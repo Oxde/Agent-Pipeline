@@ -4,6 +4,13 @@ This file is addressed to you, not to a human reading over your shoulder. If
 you have been pointed at a repository that uses `agent-pipeline`, read this
 before you start work.
 
+```bash
+pip install git+https://github.com/Oxde/Agent-Pipeline.git
+```
+
+If you are working inside a skill-aware runtime, the shorter operational
+version is `skills/agent-pipeline/SKILL.md` — same rules, less prose.
+
 ## What this engine is to you
 
 It is a referee, not a manager. It will not tell you how to write, what the
@@ -74,6 +81,41 @@ downstream of it is now stale. `status` will show it and `ship` will refuse.
 Run `reopen <phase> --reason '...'` — it invalidates only the real dependents,
 so nothing unaffected is thrown away.
 
+
+## Showing your work
+
+```bash
+agent-pipeline graph --status     # a mermaid diagram of the run — good in a PR or a report
+agent-pipeline report --out status.html
+```
+
+`report` writes ONE self-contained HTML file covering every run under the root:
+each phase's state, what is blocking anything in progress, verdicts with their
+evidence, and cost per phase. No server, no network, no JavaScript.
+
+Generate it when a human asks where things stand, when you finish a session, or
+at the end of an unattended run. It is the artifact a person can read without
+running anything, which is usually the difference between them seeing the state
+of the work and them asking you for it.
+
+## Telling the user
+
+If the pipeline declares `notify:`, **the engine already messages them** on
+`phase_started`, `phase_completed`, `phase_blocked`, `approval_needed` and
+`run_shipped`. Do not also send your own duplicate message.
+
+`approval_needed` fires by itself the moment a human criterion is what is
+holding the run up — so when you hit an approval gate, record nothing, invent
+nothing, and wait. They have been told.
+
+Check whether hooks exist before assuming either way:
+
+```bash
+grep -A3 '^notify:' pipeline.yaml pipelines/*.yaml 2>/dev/null
+```
+
+If there are none and the run needs a person, say so in your own reply instead.
+
 ## Costs
 
 If a phase spends money, log it as you go:
@@ -94,8 +136,8 @@ If you have been asked to build a new pipeline rather than walk one:
    step type genuinely recurs — see `docs/03-adding-a-block.md`.
 3. Run `agent-pipeline validate` before anything runs. It costs nothing and
    catches a broken pipeline for free rather than three paid steps in.
-4. Keep `engine/` domain-agnostic. Anything that knows about the work belongs
-   in a pipeline or a block. If you find yourself editing `engine/` to make
+4. Keep `agent_pipeline/` domain-agnostic. Anything that knows about the work belongs
+   in a pipeline or a block. If you find yourself editing `agent_pipeline/` to make
    your pipeline work, the pipeline is wrong.
 
 ## The one thing worth internalising
