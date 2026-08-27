@@ -1,0 +1,27 @@
+id: publish
+name: Publish
+description: >
+  The irreversible one. Once this runs, it is outside and other people have
+  seen it. Gated by a human, always.
+
+artifact: "{workdir}/{phase}-record.md"
+
+guidance: |
+  Before this runs, assume you cannot take it back — because mostly you cannot.
+  A deleted post was still seen, and a corrected one was still quoted.
+
+  Record where it went, when, and under what account. Six weeks from now the
+  question will be "which version went out on the 14th", and nothing else can
+  answer it.
+
+criteria:
+  - id: no-placeholders
+    kind: mechanical
+    description: The publish record is filled in.
+    run: python3 {engine}/checks/no_placeholders.py {artifact}
+
+  - id: go-live
+    kind: human
+    description: A person authorised publication.
+    ask: >
+      Publish this, now, as it stands? Confirm the destination and the account.

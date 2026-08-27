@@ -189,11 +189,18 @@ agent-pipeline status
 ## Install
 
 ```bash
-git clone https://github.com/Oxde/Agent-Pipeline.git && cd Agent-Pipeline
-pip install pyyaml                                    # the only dependency
+pip install git+https://github.com/Oxde/Agent-Pipeline.git
+```
 
+That installs the `agent-pipeline` command with the built-in blocks and checks
+bundled inside the package, so it works from any directory. One dependency: PyYAML.
+
+Working on the engine itself:
+
+```bash
+git clone https://github.com/Oxde/Agent-Pipeline.git && cd Agent-Pipeline
+pip install -e .
 python3 -m unittest discover -s tests                 # 25 tests, all generic
-ln -s "$PWD/bin/agent-pipeline" /usr/local/bin/agent-pipeline
 ```
 
 ## Use it
@@ -336,6 +343,21 @@ The engine refuses transitions. An agent that never calls the engine hasn't been
 
 → **[docs/05-enforcement.md](docs/05-enforcement.md)**
 
+## Use it from an agent
+
+The repo ships a skill at [`skills/agent-pipeline/SKILL.md`](skills/agent-pipeline/SKILL.md).
+Point your agent at it and the loop, the verdict rules, and the refusal table
+load on their own whenever a pipeline is in play.
+
+```bash
+# Claude Code
+ln -s "$PWD/skills/agent-pipeline" ~/.claude/skills/agent-pipeline
+# or per project
+ln -s "$PWD/skills/agent-pipeline" <project>/.claude/skills/agent-pipeline
+```
+
+[AGENTS.md](AGENTS.md) is the longer version, for handing to an agent directly.
+
 ## Exit codes
 
 Built for hooks and cron, so any shell can gate on them:
@@ -351,22 +373,23 @@ Built for hooks and cron, so any shell can gate on them:
 ## Layout
 
 ```
-engine/          the domain-agnostic engine
-  spec.py        load + validate pipelines and blocks — spends nothing
-  ledger.py      run state: phase entries and recorded verdicts
-  gates.py       the referee: what may open, what may close, what is stale
-  runner.py      runner mode, where the engine owns the loop
-  status.py      the plain-text view
-  graph.py       mermaid / dot rendering
-blocks/          reusable phase types
-checks/          generic mechanical checks — placeholders, substance, patterns
-cli/pipeline.py  the CLI
-examples/        worked pipelines in both modes
-docs/            concepts · pipelines · blocks · criteria · enforcement
-tests/           25 tests, no domain knowledge
+agent_pipeline/    the installable package — domain-agnostic, all of it
+  spec.py          load + validate pipelines and blocks — spends nothing
+  ledger.py        run state: phase entries and recorded verdicts
+  gates.py         the referee: what may open, what may close, what is stale
+  runner.py        runner mode, where the engine owns the loop
+  status.py        the plain-text view
+  graph.py         mermaid / dot rendering
+  cli.py           the CLI
+  blocks/          reusable phase types      ] bundled with the package so a
+  checks/          generic mechanical checks ] pip install is self-contained
+skills/            an agent skill — drop into .claude/skills/ or agentskills.io
+examples/          worked pipelines in both modes
+docs/              concepts · pipelines · blocks · criteria · enforcement
+tests/             25 tests, no domain knowledge
 ```
 
-**The rule that keeps this useful: `engine/` stays domain-agnostic.** Anything that knows about your work goes in a pipeline or a block, never in the engine. If you're editing `engine/` to make your pipeline work, the pipeline is wrong.
+**The rule that keeps this useful: `agent_pipeline/` stays domain-agnostic.** Anything that knows about your work goes in a pipeline or a block, never in the engine. If you're editing `engine/` to make your pipeline work, the pipeline is wrong.
 
 ## Licence
 

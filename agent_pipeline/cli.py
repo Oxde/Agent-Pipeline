@@ -15,11 +15,12 @@ import argparse
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# The installed package is self-contained: built-in blocks and checks ship
+# inside it, so {engine} resolves here whether this was pip-installed into a
+# venv or run straight out of a clone.
+PACKAGE_ROOT = Path(__file__).resolve().parent
 
-from engine import (  # noqa: E402
+from agent_pipeline import (  # noqa: E402
     Context,
     Ledger,
     Verdict,
@@ -33,11 +34,11 @@ from engine import (  # noqa: E402
     render_status,
     run_pipeline,
 )
-from engine.gates import GateError  # noqa: E402
-from engine.graph import render as render_graph  # noqa: E402
-from engine.spec import SpecError  # noqa: E402
+from agent_pipeline.gates import GateError  # noqa: E402
+from agent_pipeline.graph import render as render_graph  # noqa: E402
+from agent_pipeline.spec import SpecError  # noqa: E402
 
-BUILTIN_BLOCKS = REPO_ROOT / "blocks"
+BUILTIN_BLOCKS = PACKAGE_ROOT / "blocks"
 
 EXIT_OK, EXIT_REFUSED, EXIT_BAD_REQUEST = 0, 1, 2
 
@@ -99,7 +100,7 @@ def _load(args: argparse.Namespace):
         ) from exc
     workdir = Path(workdir_rel)
     workdir = workdir if workdir.is_absolute() else root / workdir
-    ctx = Context(root=root, run=args.run, workdir=workdir, engine=REPO_ROOT, vars=variables)
+    ctx = Context(root=root, run=args.run, workdir=workdir, engine=PACKAGE_ROOT, vars=variables)
     ledger = Ledger.load(workdir, pipeline.name, args.run)
     return pipeline, ledger, ctx, blocks
 

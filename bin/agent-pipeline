@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Thin wrapper so `agent-pipeline` works from anywhere.
-#   ln -s "$PWD/bin/agent-pipeline" /usr/local/bin/agent-pipeline
+# Run straight from a clone, without installing.
+#   pip install -e .   is the better route — this is the no-install fallback.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec python3 "$HERE/cli/pipeline.py" "$@"
+exec python3 -c 'import sys; from agent_pipeline.cli import main; sys.exit(main())' "$@"

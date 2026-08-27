@@ -19,8 +19,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+PACKAGE_ROOT = REPO_ROOT / "agent_pipeline"
 
-from engine import (  # noqa: E402
+from agent_pipeline import (  # noqa: E402
     Context,
     Ledger,
     Verdict,
@@ -31,7 +32,7 @@ from engine import (  # noqa: E402
     load_pipeline,
     now_iso,
 )
-from engine.spec import SpecError  # noqa: E402
+from agent_pipeline.spec import SpecError  # noqa: E402
 
 
 def write(path: Path, text: str) -> Path:
@@ -53,7 +54,7 @@ class Harness(unittest.TestCase):
         self._tmp.cleanup()
 
     def blocks(self):
-        return load_blocks(REPO_ROOT / "blocks", self.blocks_dir)
+        return load_blocks(PACKAGE_ROOT / "blocks", self.blocks_dir)
 
     def pipeline(self, yaml_text: str):
         path = write(self.root / "pipelines" / "p.yaml", yaml_text)
@@ -61,7 +62,7 @@ class Harness(unittest.TestCase):
 
     def context(self, run: str = "t1") -> Context:
         workdir = self.root / "runs" / run
-        return Context(root=self.root, run=run, workdir=workdir, engine=REPO_ROOT)
+        return Context(root=self.root, run=run, workdir=workdir, engine=PACKAGE_ROOT)
 
 
 # ---------------------------------------------------------------------------

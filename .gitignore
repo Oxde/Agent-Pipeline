@@ -8,3 +8,8 @@ venv/
 # Run state belongs to the project using the engine, not to the engine.
 runs/
 *.ledger.json
+
+# build output
+*.egg-info/
+build/
+dist/

@@ -1,11 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "agent-pipeline"
 version = "0.1.0"
 description = "A flexible pipeline engine for any task you need."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]
+keywords = ["pipeline", "agents", "workflow", "orchestration", "gates"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Build Tools",
+]
 
 [project.urls]
-Source = "https://github.com/Oxde/agent-pipeline"
+Source = "https://github.com/Oxde/Agent-Pipeline"
+
+[project.scripts]
+agent-pipeline = "agent_pipeline.cli:main"
+
+[tool.setuptools]
+packages = ["agent_pipeline"]
+
+# Blocks and checks ship INSIDE the package so a pip-installed copy is
+# self-contained — {engine} resolves to the installed package either way.
+[tool.setuptools.package-data]
+agent_pipeline = ["blocks/*.yaml", "checks/*.py"]

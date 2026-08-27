@@ -39,7 +39,7 @@ class Context:
     # Absolute path to the engine install. Built-in blocks reference their
     # checks as {engine}/checks/… so they keep working from any project, not
     # only from inside this repo.
-    engine: Path = Path(__file__).resolve().parent.parent
+    engine: Path = Path(__file__).resolve().parent
     vars: dict[str, str] = field(default_factory=dict)
 
     def render(self, template: str, phase: Phase | None = None) -> str:
