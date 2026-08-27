@@ -1,0 +1,56 @@
+# A worked example: topic in, published article out, one human gate before it
+# goes live. Every artifact path comes from the block default, so this file
+# stays about SEQUENCE and says nothing about craft — the blocks own that.
+name: blog-post
+description: Research-backed article, from a topic to a published piece.
+mode: referee
+workdir: runs/{run}
+
+phases:
+  - id: research
+    block: research
+
+  - id: outline
+    block: creative
+    name: Outline
+    depends_on: [research]
+    # An outline is a skeleton, so two of the creative criteria are wrong for it:
+    # it has no turn yet, and it is deliberately short. Disable one, retune the
+    # other. This is how a block gets adapted instead of forked.
+    disable: [has-turn]
+    criteria:
+      - id: substance
+        kind: mechanical
+        description: The outline has real structure, not three bullet points.
+        run: python3 {engine}/checks/min_substance.py {artifact} --min-words 15 --min-lines 4
+
+  - id: draft
+    block: creative
+    name: Draft
+    depends_on: [outline]
+    guidance: |
+      Write the piece the outline promised. If the draft wants to go somewhere
+      the outline did not, that is a signal the outline was wrong — go back and
+      fix it rather than quietly writing a different article.
+
+  - id: review
+    block: review
+    depends_on: [draft]
+
+  - id: revise
+    block: creative
+    name: Revision
+    depends_on: [review]
+    optional: true
+    guidance: |
+      Apply the review's findings. Address them or record why each one is
+      wrong — silently ignoring a finding is how the same defect ships twice.
+
+  - id: signoff
+    block: approval
+    name: Sign-off
+    depends_on: [draft, review]
+
+  - id: publish
+    block: publish
+    depends_on: [signoff]

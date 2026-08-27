@@ -1,0 +1,40 @@
+id: research
+name: Research
+description: >
+  Finding out what is actually true before anything gets built on top of it.
+  The output is notes with sources, not a summary of what you already believed.
+
+artifact: "{workdir}/{phase}.md"
+
+guidance: |
+  Write down what you FOUND, not what you already thought. The failure mode of
+  a research phase is a document that could have been written before the
+  research started — confident, tidy, and entirely prior belief.
+
+  Record the thing that surprised you. If nothing surprised you, either the
+  question was too easy or you stopped early; say which, in the notes.
+
+  Every claim that later work will lean on needs a source next to it. A claim
+  with no source is a guess, and downstream phases cannot tell the difference
+  once it is written in the same font as everything else.
+
+  Record what you could NOT find out. Absent evidence is evidence, and the gap
+  is usually where the real decision lives.
+
+criteria:
+  - id: no-placeholders
+    kind: mechanical
+    description: No TODO / TBD left in the notes.
+    run: python3 {engine}/checks/no_placeholders.py {artifact}
+
+  - id: sources
+    kind: mechanical
+    description: At least three sources are cited.
+    run: python3 {engine}/checks/contains.py {artifact} --pattern https?:// --min 3 --label sources
+
+  - id: findings-not-restatement
+    kind: judged
+    description: The notes contain something that was not already believed.
+    ask: >
+      Name one thing in these notes that could NOT have been written before the
+      research began. If everything here is prior belief restated, answer FAIL.

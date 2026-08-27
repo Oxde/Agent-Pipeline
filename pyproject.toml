@@ -1,0 +1,11 @@
+[project]
+name = "agent-pipeline"
+version = "0.1.0"
+description = "A flexible pipeline engine for any task you need."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.urls]
+Source = "https://github.com/Oxde/agent-pipeline"

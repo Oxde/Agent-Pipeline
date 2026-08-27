@@ -1,0 +1,41 @@
+id: review
+name: Adversarial review
+description: >
+  A pass whose job is to find what is wrong, not to confirm what is right. A
+  review that finds nothing is a review that did not happen.
+
+artifact: "{workdir}/{phase}.md"
+
+guidance: |
+  You are trying to break this, not to bless it. Start from the assumption that
+  there is a real defect and go looking for it.
+
+  Attack in this order, because the cost of being wrong falls fast:
+
+  1. Is the central claim actually true?
+  2. Does the piece do what the brief asked, or something adjacent that was
+     easier?
+  3. Would a hostile reader find a hole? Name the reader and the hole.
+  4. What did the author avoid because it was hard?
+
+  Write findings as defects with locations, not as impressions. "The opening is
+  weak" is not actionable; "the opening asks a question the piece never
+  answers — line 3 vs. the close" is.
+
+  If you genuinely find nothing, say so explicitly and state what you checked.
+  Silence and a clean bill of health look identical afterwards, and only one of
+  them is true.
+
+criteria:
+  - id: no-placeholders
+    kind: mechanical
+    description: The review itself is written, not stubbed.
+    run: python3 {engine}/checks/no_placeholders.py {artifact}
+
+  - id: adversarial
+    kind: judged
+    description: The review attempted to break the work, not to approve it.
+    ask: >
+      Does this review name at least one concrete defect with a location, or
+      explicitly state what was checked and why nothing was found? Vague
+      approval answers FAIL.

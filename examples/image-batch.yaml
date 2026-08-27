@@ -1,0 +1,30 @@
+# Runner mode: nobody is watching, so the ENGINE holds the loop and calls out
+# per phase. An agent invoked this way cannot skip a step, because it never
+# decides what comes next.
+#
+#   agent-pipeline --pipeline examples/image-batch.yaml --run 2026-08-27 run
+#
+name: image-batch
+description: Unattended batch — build prompts, generate, contact-sheet, log spend.
+mode: runner
+workdir: runs/{run}
+
+phases:
+  - id: prompts
+    block: creative
+    name: Prompt set
+    run: your-agent write-prompts --brief {workdir}/brief.md --out {artifact}
+    guidance: |
+      One prompt per image, each naming subject, framing and lighting.
+    disable: [has-turn, only-you]
+
+  - id: generate
+    block: generate
+    depends_on: [prompts]
+    run: your-generator --prompts {workdir}/prompts.md --manifest {artifact}
+
+  - id: contact_sheet
+    name: Contact sheet
+    artifact: "{workdir}/contact-sheet.png"
+    depends_on: [generate]
+    run: your-montage --manifest {workdir}/generate/manifest.json --out {artifact}
