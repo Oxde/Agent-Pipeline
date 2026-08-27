@@ -114,6 +114,14 @@ def run_pipeline(
         step = _execute(phase, ctx, timeout)
         result.steps.append(step)
 
+        # The command may have written to the ledger itself — an agent recording
+        # a judged verdict is how an unattended run answers a criterion nobody
+        # is present for. Absorb that before evaluating, or the save below
+        # destroys it and the phase blocks on a verdict it actually has.
+        absorbed = ledger.absorb_external(ctx.workdir)
+        if absorbed:
+            _emit(on_event, "absorbed", phase, None)
+
         report = check_can_complete(pipeline, ledger, phase, ctx)
         step.report = report
 

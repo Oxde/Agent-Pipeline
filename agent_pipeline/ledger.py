@@ -173,6 +173,44 @@ class Ledger:
 
     # -- transitions --------------------------------------------------------
 
+    def absorb_external(self, workdir: Path) -> list[str]:
+        """Merge in changes a subprocess made to the ledger on disk.
+
+        Runner mode holds this object in memory while a phase command runs, and
+        that command may itself call `judge`, `approve` or `cost` — an agent
+        recording its own verdict is the normal way an unattended pipeline
+        satisfies a judged criterion. Without this merge the next save silently
+        overwrites those writes, and the phase blocks forever on a verdict that
+        was recorded and then destroyed.
+
+        Returns the ids of what was absorbed, so the caller can say so.
+        """
+        path = Ledger.path_for(workdir)
+        if not path.is_file():
+            return []
+        try:
+            disk = Ledger.load(workdir, self.pipeline, self.run)
+        except LedgerError:
+            return []
+
+        absorbed: list[str] = []
+        for pid, their in disk.phases.items():
+            mine = self.entry(pid)
+            for cid, verdict in their.verdicts.items():
+                current = mine.verdicts.get(cid)
+                # Newest recorded verdict wins. A subprocess that just answered
+                # a criterion is more current than whatever we loaded earlier.
+                if current is None or verdict.recorded_at >= current.recorded_at:
+                    if current is None or current.recorded_at != verdict.recorded_at:
+                        absorbed.append(f"{pid}/{cid}")
+                    mine.verdicts[cid] = verdict
+            if their.cost_usd != mine.cost_usd:
+                mine.cost_usd = their.cost_usd
+            for note in their.notes:
+                if note not in mine.notes:
+                    mine.notes.append(note)
+        return absorbed
+
     def record_verdict(self, phase_id: str, verdict: Verdict) -> None:
         self.entry(phase_id).verdicts[verdict.criterion] = verdict
 

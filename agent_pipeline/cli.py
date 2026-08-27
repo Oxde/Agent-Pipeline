@@ -394,9 +394,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     pipeline, ledger, ctx, _ = _load(args)
 
     def on_event(kind: str, phase, report) -> None:
-        symbol = {"start": "◐", "complete": "✓", "cached": "·", "blocked": "⛔"}[kind]
-        note = " (cached)" if kind == "cached" else ""
+        symbol = {"start": "◐", "complete": "✓", "cached": "·",
+                  "blocked": "⛔", "absorbed": "↩"}[kind]
+        note = {"cached": " (cached)",
+                "absorbed": " (verdict recorded by the phase itself)"}.get(kind, "")
         print(f"  {symbol} {phase.id}{note}", flush=True)
+        if kind == "absorbed":
+            return
         if kind == "start":
             _notify(args, pipeline, ctx, "phase_started", phase=phase.id, detail=phase.name)
         elif kind == "complete":

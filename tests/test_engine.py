@@ -441,5 +441,63 @@ class TestLedgerRoundTrip(Harness):
         self.assertEqual(again.total_cost(), 1.25)
 
 
+class TestSubprocessWrites(Harness):
+    """Runner mode must not clobber ledger writes made by the phase command.
+
+    Found in a live run: a phase invoked an agent, the agent recorded its own
+    judged verdict on disk, and the runner's next save destroyed it — so the
+    phase blocked forever on a criterion it had actually answered.
+    """
+
+    def test_a_verdict_written_by_the_phase_command_survives(self) -> None:
+        workdir = self.root / "runs" / "t1"
+        on_disk = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        on_disk.record_verdict("a", Verdict(
+            criterion="judged-one", kind="judged", status="pass",
+            evidence="the subprocess said so", recorded_at=now_iso(), by="agent",
+        ))
+        on_disk.save(workdir)
+
+        # what the runner is holding: no idea any of that happened
+        in_memory = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        in_memory.entry("a").status = "active"
+
+        absorbed = in_memory.absorb_external(workdir)
+        self.assertEqual(absorbed, ["a/judged-one"])
+        self.assertEqual(in_memory.entry("a").verdict("judged-one").by, "agent")
+
+        in_memory.save(workdir)
+        reloaded = Ledger.load(workdir, "p", "t1")
+        self.assertIsNotNone(reloaded.entry("a").verdict("judged-one"))
+
+    def test_a_newer_verdict_on_disk_wins(self) -> None:
+        workdir = self.root / "runs" / "t1"
+        stale = Verdict(criterion="c", kind="judged", status="fail",
+                        evidence="old", recorded_at="2020-01-01T00:00:00+00:00", by="old")
+        fresh = Verdict(criterion="c", kind="judged", status="pass",
+                        evidence="new", recorded_at="2030-01-01T00:00:00+00:00", by="new")
+        disk = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        disk.record_verdict("a", fresh)
+        disk.save(workdir)
+
+        mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        mem.record_verdict("a", stale)
+        mem.absorb_external(workdir)
+        self.assertEqual(mem.entry("a").verdict("c").by, "new")
+
+    def test_cost_logged_by_the_phase_command_survives(self) -> None:
+        workdir = self.root / "runs" / "t1"
+        disk = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        disk.entry("a").cost_usd = 0.63
+        disk.save(workdir)
+        mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        mem.absorb_external(workdir)
+        self.assertEqual(mem.entry("a").cost_usd, 0.63)
+
+    def test_absorbing_from_an_empty_workdir_is_harmless(self) -> None:
+        mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        self.assertEqual(mem.absorb_external(self.root / "nope"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
