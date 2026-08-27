@@ -198,6 +198,11 @@ def cmd_guide(args: argparse.Namespace) -> int:
         print(f"  artifact: {artifact}")
     if phase.depends_on:
         print(f"  depends on: {', '.join(phase.depends_on)}")
+    if phase.context:
+        print("\n  Required reading — read every one of these BEFORE starting:")
+        for path in ctx.context_paths(phase):
+            mark = "" if path.is_file() else "   ← MISSING (start will refuse)"
+            print(f"    · {path}{mark}")
     if phase.guidance:
         print("\n" + "\n".join(f"  {line}" for line in phase.guidance.splitlines()))
     if phase.criteria:
@@ -224,7 +229,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     pipeline, ledger, ctx, _ = _load(args)
     phase = pipeline.phase(args.phase)
-    report = check_can_start(pipeline, ledger, phase)
+    report = check_can_start(pipeline, ledger, phase, ctx)
     if not report.ok:
         print(render_report(report, title=f"cannot start '{phase.id}'"))
         return EXIT_REFUSED

@@ -42,6 +42,7 @@ phases:
 | `criteria` | extra criteria, or overrides of the block's by id |
 | `disable` | block criteria to drop, by id |
 | `guidance` | replaces the block's guidance for this phase |
+| `context` | required reading — `guide` lists it, `start` refuses while any file is missing |
 | `optional` | may be skipped without blocking `ship` |
 | `run` | the command, **runner mode only** |
 | `iterate` / `max_iterations` / `archive` | override the block's iteration policy |
@@ -95,6 +96,33 @@ Two mechanisms, both in this example:
 Reach for `disable` and an override before you fork a block. A second block that
 differs from the first by one threshold is two blocks to maintain and one of
 them will drift.
+
+## Required reading
+
+```yaml
+  - id: draft
+    block: creative
+    context: ["docs/RULES.md", "{workdir}/brief.md"]
+```
+
+`guide draft` prints the list with a read-these-first instruction, and `start`
+refuses while any listed file is missing (`context-missing`). Blocks may carry
+standing context; the phase's own entries append to it.
+
+The honest limit: the engine cannot see a read. Existence is mechanical; whether
+the content landed is a judged criterion's job — ask for a quote:
+
+```yaml
+      - id: rules-applied
+        kind: judged
+        description: The relevant rule was found and obeyed.
+        ask: >
+          Quote the one rule from docs/RULES.md that most constrains this
+          artifact, and point to the line that obeys it. No quote = FAIL.
+```
+
+Declared reading in, quoted evidence out — that pincer is as close to
+"make sure it read the files" as anything can honestly get.
 
 ## Optional phases
 

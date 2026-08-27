@@ -639,5 +639,52 @@ class TestSchemaMigration(Harness):
         self.assertIsInstance(raw["phases"]["a"]["verdicts"]["x"], list)
 
 
+class TestRequiredReading(Harness):
+    """context: — required reading, existence-gated at start."""
+
+    PIPE = """
+        name: p
+        workdir: runs/{run}
+        phases:
+          - id: a
+            artifact: "{workdir}/a.md"
+            context: ["docs/rules.md", "{workdir}/brief.md"]
+    """
+
+    def test_start_refuses_while_required_reading_is_missing(self) -> None:
+        p = self.pipeline(self.PIPE)
+        ctx = self.context()
+        ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        r = check_can_start(p, ledger, p.phase("a"), ctx)
+        self.assertFalse(r.ok)
+        self.assertEqual({f.code for f in r.failures}, {"context-missing"})
+        self.assertEqual(len(r.failures), 2)
+
+    def test_start_allowed_once_the_files_exist(self) -> None:
+        p = self.pipeline(self.PIPE)
+        ctx = self.context()
+        write(self.root / "docs" / "rules.md", "the rules\n")
+        write(ctx.workdir / "brief.md", "the brief\n")
+        ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        self.assertTrue(check_can_start(p, ledger, p.phase("a"), ctx).ok)
+
+    def test_block_context_is_inherited_and_merged(self) -> None:
+        write(self.blocks_dir / "briefed.yaml", """
+            id: briefed
+            name: Briefed
+            description: Carries standing required reading.
+            context: ["docs/rules.md"]
+        """)
+        p = self.pipeline("""
+            name: p
+            phases:
+              - id: a
+                block: briefed
+                artifact: "{workdir}/a.md"
+                context: ["docs/extra.md", "docs/rules.md"]
+        """)
+        self.assertEqual(p.phase("a").context, ["docs/rules.md", "docs/extra.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

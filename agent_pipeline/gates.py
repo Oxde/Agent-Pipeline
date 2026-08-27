@@ -60,6 +60,13 @@ class Context:
                 f"Pass it with --var {exc.args[0]}=..., or add it to the pipeline's vars."
             ) from exc
 
+    def context_paths(self, phase: Phase) -> list[Path]:
+        out: list[Path] = []
+        for template in phase.context:
+            p = Path(self.render(template, phase))
+            out.append(p if p.is_absolute() else self.root / p)
+        return out
+
     def artifact_path(self, phase: Phase) -> Path | None:
         if phase.artifact is None:
             return None
@@ -96,7 +103,9 @@ class GateReport:
 # opening a phase
 # ---------------------------------------------------------------------------
 
-def check_can_start(pipeline: Pipeline, ledger: Ledger, phase: Phase) -> GateReport:
+def check_can_start(
+    pipeline: Pipeline, ledger: Ledger, phase: Phase, ctx: Context | None = None
+) -> GateReport:
     report = GateReport(phase=phase.id, ok=True)
     for dep in phase.depends_on:
         if not ledger.is_complete(dep):
@@ -110,6 +119,16 @@ def check_can_start(pipeline: Pipeline, ledger: Ledger, phase: Phase) -> GateRep
                 f"'{phase.id}' depends on '{dep}', which is {status}.",
                 f"Run: start {dep} -> produce its artifact -> complete {dep}",
             )
+    # Required reading must EXIST before work starts. Whether it was read is
+    # unknowable from here; whether it is readable is not.
+    if ctx is not None:
+        for path in ctx.context_paths(phase):
+            if not path.is_file():
+                report.add(
+                    "context-missing",
+                    f"'{phase.id}' declares {path} as required reading — it does not exist.",
+                    "Fix the path in the pipeline, or produce the file it points at.",
+                )
     return report
 
 
@@ -142,7 +161,7 @@ def check_can_complete(
         )
         return report
 
-    dep_report = check_can_start(pipeline, ledger, phase)
+    dep_report = check_can_start(pipeline, ledger, phase, ctx)
     report.failures.extend(dep_report.failures)
     report.ok = report.ok and dep_report.ok
 

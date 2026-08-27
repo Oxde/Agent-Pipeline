@@ -82,7 +82,7 @@ def run_pipeline(
             _emit(on_event, "cached", phase, None)
             continue
 
-        start_report = check_can_start(pipeline, ledger, phase)
+        start_report = check_can_start(pipeline, ledger, phase, ctx)
         if not start_report.ok:
             result.stopped_at = phase.id
             result.steps.append(StepResult(phase=phase.id, ok=False, report=start_report))

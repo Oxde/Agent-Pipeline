@@ -228,6 +228,11 @@ class Block:
     name: str
     description: str
     guidance: str = ""
+    # Required reading: files the worker must read before starting this kind of
+    # phase. The engine cannot see a read — what it CAN do is hand the list to
+    # the worker via `guide` and refuse to start while a listed file is missing.
+    # Verifying comprehension is a judged criterion's job (ask for a quote).
+    context: list[str] = field(default_factory=list)
     artifact: str | None = None
     criteria: list[Criterion] = field(default_factory=list)
     iterate: bool = False
@@ -253,6 +258,7 @@ class Block:
             name=_as_str(_require(data, "name", seat), "name", seat),
             description=_as_str(_require(data, "description", seat), "description", seat),
             guidance=str(data.get("guidance") or "").strip(),
+            context=_as_str_list(data.get("context"), "context", seat),
             artifact=_as_str(artifact, "artifact", seat) if artifact is not None else None,
             criteria=_parse_criteria(data.get("criteria"), seat),
             iterate=iterate,
@@ -301,6 +307,7 @@ def _resolve_inheritance(blocks: dict[str, Block]) -> dict[str, Block]:
         merged = replace(
             block,
             guidance=block.guidance or parent.guidance,
+            context=list(dict.fromkeys([*parent.context, *block.context])),
             artifact=block.artifact if block.artifact is not None else parent.artifact,
             criteria=_merge_criteria(parent.criteria, block.criteria),
         )
@@ -338,6 +345,7 @@ class Phase:
     depends_on: list[str]
     criteria: list[Criterion]
     guidance: str
+    context: list[str]
     optional: bool
     iterate: bool
     max_iterations: int
@@ -518,6 +526,10 @@ def _parse_phase(raw: object, where: str, blocks: dict[str, Block]) -> Phase:
         depends_on=_as_str_list(data.get("depends_on"), "depends_on", seat),
         criteria=_merge_criteria(inherited, own),
         guidance=str(data.get("guidance") or (block.guidance if block else "")).strip(),
+        context=list(dict.fromkeys([
+            *((block.context if block else [])),
+            *_as_str_list(data.get("context"), "context", seat),
+        ])),
         optional=_as_bool(data.get("optional"), "optional", seat, False),
         iterate=iterate,
         max_iterations=max_iterations,

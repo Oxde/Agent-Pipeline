@@ -31,6 +31,10 @@ agent-pipeline start <phase>       # refuses if a dependency is incomplete
 agent-pipeline complete <phase>    # runs every gate
 ```
 
+If `guide` shows a **Required reading** list, read every file on it before
+touching the artifact — the criteria are usually written so that only someone
+who read them can answer.
+
 `complete` refuses with the exact cause. **The refusal is the specification** —
 read it, fix the cause, run it again. Do not work around it.
 
