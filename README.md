@@ -8,7 +8,7 @@ Define a pipeline once, in YAML. Point any agent at it — Claude, Hermes, a cro
 The engine decides what may start, what may finish, and what has gone stale.<br/>
 It doesn't do the work, and doesn't care who does.
 
-[Concepts](docs/01-concepts.md) · [Writing a pipeline](docs/02-writing-a-pipeline.md) · [Adding a block](docs/03-adding-a-block.md) · [Criteria](docs/04-criteria.md) · [Enforcement](docs/05-enforcement.md) · [AGENTS.md](AGENTS.md)
+[Concepts](docs/01-concepts.md) · [Writing a pipeline](docs/02-writing-a-pipeline.md) · [Adding a block](docs/03-adding-a-block.md) · [Criteria](docs/04-criteria.md) · [Enforcement](docs/05-enforcement.md) · [Notifications](docs/06-notifications.md) · [AGENTS.md](AGENTS.md)
 
 </div>
 
@@ -200,7 +200,7 @@ Working on the engine itself:
 ```bash
 git clone https://github.com/Oxde/Agent-Pipeline.git && cd Agent-Pipeline
 pip install -e .
-python3 -m unittest discover -s tests                 # 25 tests, all generic
+python3 -m unittest discover -s tests                 # 41 tests, all generic
 ```
 
 ## Use it
@@ -343,6 +343,58 @@ The engine refuses transitions. An agent that never calls the engine hasn't been
 
 → **[docs/05-enforcement.md](docs/05-enforcement.md)**
 
+## Telling someone
+
+An agent that talks to a person over Telegram or Slack needs to say *this is
+done* and, more importantly, *I need you before I can continue*. Declare
+commands, and the engine runs them on lifecycle events:
+
+```yaml
+notify:
+  - name: telegram
+    events: [approval_needed, phase_blocked, run_shipped]
+    run: ./notify/telegram.sh
+```
+
+```bash
+#!/bin/sh
+curl -sS -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+  --data-urlencode "chat_id=$TG_CHAT" \
+  --data-urlencode "text=$AGENT_PIPELINE_MESSAGE" > /dev/null
+```
+
+What lands on the phone:
+
+```
+[daily-post · 2026-08-27] ✓ finished draft
+[daily-post · 2026-08-27] ✋ needs you: signoff
+• [approved] A person has seen this and decided to proceed. — no verdict recorded.
+```
+
+`approval_needed` is the one to wire first — it's the difference between an
+agent that waits silently and one that tells you it's waiting.
+
+Payloads arrive as environment variables, and only `{event}` `{phase}` `{run}`
+`{pipeline}` may reach a command line — blocker text is arbitrary content, and
+arbitrary content in a shell command is an injection waiting to happen. A
+notification can never break a run: hooks are fire-and-forget, failures are
+logged and ignored.
+
+→ **[docs/06-notifications.md](docs/06-notifications.md)**
+
+## A dashboard, without a server
+
+```bash
+agent-pipeline report --open
+```
+
+One self-contained HTML file — every run under the root, each phase with its
+state, what's blocking it, verdicts with their evidence, and cost per phase.
+No server, no build step, no network. You open it by double-clicking.
+
+That constraint is the point: the person who most needs to see where a pipeline
+is stuck is usually the one who won't run a command to find out.
+
 ## Use it from an agent
 
 The repo ships a skill at [`skills/agent-pipeline/SKILL.md`](skills/agent-pipeline/SKILL.md).
@@ -380,13 +432,15 @@ agent_pipeline/    the installable package — domain-agnostic, all of it
   runner.py        runner mode, where the engine owns the loop
   status.py        the plain-text view
   graph.py         mermaid / dot rendering
+  notify.py        lifecycle events out to Telegram, Slack, anything
+  report.py        the single-file HTML dashboard
   cli.py           the CLI
   blocks/          reusable phase types      ] bundled with the package so a
   checks/          generic mechanical checks ] pip install is self-contained
 skills/            an agent skill — drop into .claude/skills/ or agentskills.io
 examples/          worked pipelines in both modes
 docs/              concepts · pipelines · blocks · criteria · enforcement
-tests/             25 tests, no domain knowledge
+tests/             41 tests, no domain knowledge
 ```
 
 **The rule that keeps this useful: `agent_pipeline/` stays domain-agnostic.** Anything that knows about your work goes in a pipeline or a block, never in the engine. If you're editing `engine/` to make your pipeline work, the pipeline is wrong.

@@ -9,6 +9,14 @@ description: Unattended batch — build prompts, generate, contact-sheet, log sp
 mode: runner
 workdir: runs/{run}
 
+# Nobody is watching an unattended run, so it has to speak up. approval_needed
+# fires only when a HUMAN criterion is what's holding things up — the difference
+# between an agent that waits silently and one that says it's waiting.
+notify:
+  - name: telegram
+    events: [approval_needed, phase_blocked, run_shipped]
+    run: ./examples/notify/telegram.sh
+
 phases:
   - id: prompts
     block: creative

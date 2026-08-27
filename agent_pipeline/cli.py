@@ -12,6 +12,7 @@ can be refused. Exit codes are meant to be used from scripts and hooks:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -36,6 +37,8 @@ from agent_pipeline import (  # noqa: E402
 )
 from agent_pipeline.gates import GateError  # noqa: E402
 from agent_pipeline.graph import render as render_graph  # noqa: E402
+from agent_pipeline.notify import emit as emit_event  # noqa: E402
+from agent_pipeline.report import build_view, find_ledgers, render_page  # noqa: E402
 from agent_pipeline.spec import SpecError  # noqa: E402
 
 BUILTIN_BLOCKS = PACKAGE_ROOT / "blocks"
@@ -102,12 +105,40 @@ def _load(args: argparse.Namespace):
     workdir = workdir if workdir.is_absolute() else root / workdir
     ctx = Context(root=root, run=args.run, workdir=workdir, engine=PACKAGE_ROOT, vars=variables)
     ledger = Ledger.load(workdir, pipeline.name, args.run)
+    # Remember how this run was parameterised; a report generated later has
+    # no other way to resolve {slug}-style artifact paths.
+    ledger.vars = {**ledger.vars, **variables}
     return pipeline, ledger, ctx, blocks
 
 
 # ---------------------------------------------------------------------------
 # commands
 # ---------------------------------------------------------------------------
+
+def _notify(args, pipeline, ctx, event: str, *, phase: str = "", detail: str = "") -> None:
+    """Fire outbound hooks. Never lets a failed notification affect the run."""
+    if getattr(args, "no_notify", False) or not pipeline.notify:
+        return
+    result = emit_event(
+        pipeline.notify, event,
+        pipeline=pipeline.name, run=ctx.run, root=ctx.root,
+        phase=phase, detail=detail,
+    )
+    for label in result.fired:
+        print(f"    → notified: {label}")
+    for label, why in result.failed:
+        # Loud, but not fatal. A broken webhook is worth seeing and not worth
+        # stopping for.
+        print(f"    → notify FAILED ({label}): {why}", file=sys.stderr)
+
+
+def _approval_pending(pipeline, phase, report) -> bool:
+    """Is this refusal specifically 'a person has not answered yet'?"""
+    if not any(f.code == "criterion-unanswered" for f in report.failures):
+        return False
+    human = {c.id for c in phase.criteria if c.kind == "human"}
+    return any(any(f"[{cid}]" in f.message for cid in human) for f in report.failures)
+
 
 def cmd_validate(args: argparse.Namespace) -> int:
     pipeline, _, _, blocks = _load(args)
@@ -203,6 +234,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     entry.started_at = entry.started_at or now_iso()
     ledger.save(ctx.workdir)
     print(f"  ◐ started {phase.id} ({phase.name})")
+    _notify(args, pipeline, ctx, "phase_started", phase=phase.id, detail=phase.name)
     artifact = ctx.artifact_path(phase)
     if artifact:
         print(f"    expected artifact: {artifact}")
@@ -219,6 +251,9 @@ def cmd_complete(args: argparse.Namespace) -> int:
 
     if not report.ok and not args.force:
         print(render_report(report, title=f"cannot complete '{phase.id}'"))
+        blockers = "\n".join(f"• {f.message}" for f in report.failures)
+        event = "approval_needed" if _approval_pending(pipeline, phase, report) else "phase_blocked"
+        _notify(args, pipeline, ctx, event, phase=phase.id, detail=blockers)
         return EXIT_REFUSED
 
     entry = ledger.entry(phase.id)
@@ -239,6 +274,7 @@ def cmd_complete(args: argparse.Namespace) -> int:
     print(f"  {mark} completed {phase.id} ({phase.name})")
     if entry.forced:
         print("    This will be flagged at ship time.")
+    _notify(args, pipeline, ctx, "phase_completed", phase=phase.id, detail=phase.name)
     return EXIT_OK
 
 
@@ -349,6 +385,8 @@ def cmd_ship(args: argparse.Namespace) -> int:
         return EXIT_REFUSED
     print(f"\n  ✓ {pipeline.name} run={ledger.run} — all required gates passed "
           f"(${ledger.total_cost():.2f} spent)\n")
+    _notify(args, pipeline, ctx, "run_shipped",
+            detail=f"${ledger.total_cost():.2f} spent across {len(pipeline.phases)} phases")
     return EXIT_OK
 
 
@@ -359,6 +397,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         symbol = {"start": "◐", "complete": "✓", "cached": "·", "blocked": "⛔"}[kind]
         note = " (cached)" if kind == "cached" else ""
         print(f"  {symbol} {phase.id}{note}", flush=True)
+        if kind == "start":
+            _notify(args, pipeline, ctx, "phase_started", phase=phase.id, detail=phase.name)
+        elif kind == "complete":
+            _notify(args, pipeline, ctx, "phase_completed", phase=phase.id, detail=phase.name)
+        elif kind == "blocked" and report is not None:
+            blockers = "\n".join(f"• {f.message}" for f in report.failures)
+            event = "approval_needed" if _approval_pending(pipeline, phase, report) else "phase_blocked"
+            _notify(args, pipeline, ctx, event, phase=phase.id, detail=blockers)
 
     result = run_pipeline(
         pipeline, ledger, ctx,
@@ -400,6 +446,75 @@ def cmd_graph(args: argparse.Namespace) -> int:
         print(f"  wrote {out}")
         return EXIT_OK
     print(text)
+    return EXIT_OK
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    """One self-contained HTML page showing every run found under --root.
+
+    Deliberately a file rather than a server: the person who most needs to see
+    where a pipeline is stuck is usually the one who will not run a command to
+    find out, and a dashboard that needs a dev server is one nobody opens.
+    """
+    root = Path(args.root).resolve()
+    blocks = load_blocks(BUILTIN_BLOCKS, root / "blocks")
+
+    # Index every pipeline definition we can find, so a ledger can be matched
+    # to the pipeline that produced it by name.
+    candidates: list[Path] = []
+    for guess in (root / "pipeline.yaml", root / "pipeline.yml"):
+        if guess.is_file():
+            candidates.append(guess)
+    if (root / "pipelines").is_dir():
+        candidates.extend(sorted((root / "pipelines").glob("*.y*ml")))
+    if args.pipeline:
+        explicit = Path(args.pipeline)
+        candidates.append(explicit if explicit.is_absolute() else root / explicit)
+
+    by_name = {}
+    for path in candidates:
+        try:
+            pipe = load_pipeline(path, blocks)
+        except SpecError as exc:
+            print(f"  skipping {path.name}: {exc}", file=sys.stderr)
+            continue
+        by_name[pipe.name] = pipe
+
+    if not by_name:
+        raise SpecError(
+            f"no pipeline definitions found under {root} — expected ./pipeline.yaml "
+            f"or ./pipelines/*.yaml"
+        )
+
+    views = []
+    for ledger_path in find_ledgers(root):
+        workdir = ledger_path.parent.parent
+        try:
+            raw = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"  skipping {ledger_path}: {exc}", file=sys.stderr)
+            continue
+        name = raw.get("pipeline", "")
+        if name not in by_name:
+            print(f"  skipping {ledger_path}: no pipeline named {name!r} found", file=sys.stderr)
+            continue
+        pipe = by_name[name]
+        ledger = Ledger.load(workdir, name, raw.get("run", "main"))
+        variables = {"run": ledger.run, "root": str(root), **ledger.vars}
+        ctx = Context(root=root, run=ledger.run, workdir=workdir,
+                      engine=PACKAGE_ROOT, vars=variables)
+        views.append(build_view(pipe, ledger, ctx))
+
+    views.sort(key=lambda v: (v.pipeline.name, v.ledger.run))
+    out = Path(args.out) if args.out else root / "pipeline-report.html"
+    out = out if out.is_absolute() else root / out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_page(views, title=args.title), encoding="utf-8")
+    print(f"  wrote {out}  ({len(views)} run(s))")
+
+    if args.open:
+        import webbrowser
+        webbrowser.open(out.as_uri())
     return EXIT_OK
 
 
@@ -460,6 +575,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pipeline", help="pipeline YAML (default: ./pipeline.yaml or ./pipelines/*.yaml)")
     p.add_argument("--run", default="main", help="run id — one ledger per run (default: main)")
     p.add_argument("--var", action="append", help="template variable, key=value (repeatable)")
+    p.add_argument("--no-notify", action="store_true", help="suppress outbound notify hooks")
     sub = p.add_subparsers(dest="command", required=True)
 
     def add(name: str, fn, help_: str):
@@ -514,6 +630,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("ship", cmd_ship, "the final refusal — everything required, nothing stale")
     sp.add_argument("--allow-forced", action="store_true")
+
+    sp = add("report", cmd_report, "write one self-contained HTML page for every run")
+    sp.add_argument("--out", help="output path (default: <root>/pipeline-report.html)")
+    sp.add_argument("--title", default="Pipelines", help="page heading")
+    sp.add_argument("--open", action="store_true", help="open it in a browser")
 
     sp = add("graph", cmd_graph, "draw the pipeline (mermaid / dot)")
     sp.add_argument("--status", action="store_true", help="colour by live run state")

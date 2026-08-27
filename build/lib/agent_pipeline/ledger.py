@@ -74,6 +74,9 @@ class Ledger:
     created_at: str
     schema: int = SCHEMA_VERSION
     iteration: int = 1
+    # The --var values this run was started with. Recorded so a later command
+    # can rebuild artifact paths without being handed them again.
+    vars: dict[str, str] = field(default_factory=dict)
     phases: dict[str, PhaseEntry] = field(default_factory=dict)
 
     # -- persistence --------------------------------------------------------
@@ -122,6 +125,7 @@ class Ledger:
             created_at=raw.get("created_at", now_iso()),
             schema=SCHEMA_VERSION,
             iteration=int(raw.get("iteration", 1)),
+            vars={str(k): str(v) for k, v in (raw.get("vars") or {}).items()},
             phases=phases,
         )
 
@@ -134,6 +138,7 @@ class Ledger:
             "run": self.run,
             "created_at": self.created_at,
             "iteration": self.iteration,
+            "vars": self.vars,
             "phases": {
                 pid: {
                     "status": e.status,

@@ -19,6 +19,8 @@ from typing import Literal
 
 import yaml
 
+from .notify import EVENTS, Hook
+
 CriterionKind = Literal["mechanical", "judged", "human"]
 RunMode = Literal["referee", "runner"]
 
@@ -343,6 +345,7 @@ class Pipeline:
     mode: RunMode
     workdir: str
     phases: list[Phase]
+    notify: list[Hook] = field(default_factory=list)
     source: Path | None = None
 
     def phase(self, phase_id: str) -> Phase:
@@ -408,8 +411,50 @@ def load_pipeline(path: Path, blocks: dict[str, Block]) -> Pipeline:
         mode=mode,  # type: ignore[arg-type]
         workdir=_as_str(data.get("workdir") or "runs/{run}", "workdir", seat),
         phases=phases,
+        notify=_parse_notify(data.get("notify"), seat),
         source=path,
     )
+
+
+def _parse_notify(raw: object, where: str) -> list[Hook]:
+    """Outbound hooks: what to run when something happens.
+
+    Kept deliberately dumb — a list of (events, command). Anything clever about
+    formatting or delivery belongs in the command, not in the engine.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise SpecError(f"{where}: 'notify' must be a list, got {raw!r}")
+    hooks: list[Hook] = []
+    for i, item in enumerate(raw):
+        seat = f"{where} notify[{i}]"
+        if not isinstance(item, dict):
+            raise SpecError(f"{seat}: each notify entry must be a mapping, got {item!r}")
+        # YAML 1.1 reads a bare `on:` as the boolean True, so the key arrives
+        # as "True" rather than "on" — the same trap GitHub Actions workflows
+        # hit. `events:` is the canonical spelling; `on:` keeps working.
+        data = {str(k): v for k, v in item.items()}
+        key = next((k for k in ("events", "on", "True") if k in data), None)
+        if key is None:
+            raise SpecError(
+                f"{seat}: missing required key 'events' (the list of events to fire on). "
+                f"Known events: {list(EVENTS)}"
+            )
+        events = _as_str_list(data[key], key, seat)
+        if not events:
+            raise SpecError(f"{seat}: 'on' must name at least one event. Known: {list(EVENTS)}")
+        for ev in events:
+            if ev not in EVENTS:
+                raise SpecError(
+                    f"{seat}: unknown event {ev!r}. Known: {list(EVENTS)}"
+                )
+        hooks.append(Hook(
+            on=tuple(events),
+            run=_as_str(_require(data, "run", seat), "run", seat),
+            name=_as_str(data["name"], "name", seat) if data.get("name") else "",
+        ))
+    return hooks
 
 
 def _parse_phase(raw: object, where: str, blocks: dict[str, Block]) -> Phase:

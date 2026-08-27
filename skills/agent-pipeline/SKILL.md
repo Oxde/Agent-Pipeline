@@ -105,9 +105,15 @@ Log it as you go. Unlogged spend is why nobody can answer what a piece cost.
 ## Finishing
 
 ```bash
-agent-pipeline ship        # every required phase complete, nothing stale, nothing forced
+agent-pipeline ship             # every required phase complete, nothing stale, nothing forced
 agent-pipeline graph --status   # a mermaid diagram of the run, for a PR or a README
+agent-pipeline report --open    # one self-contained HTML page of every run — hand this to a human
 ```
+
+If the pipeline declares `notify:`, the engine messages the user by itself on
+`phase_started` / `phase_completed` / `phase_blocked` / `approval_needed` /
+`run_shipped`. You do not need to also tell them — and `approval_needed` fires
+on its own when a human criterion is what is holding the run up.
 
 Exit codes: `0` allowed · `1` refused · `2` bad request. Usable from hooks and cron.
 
