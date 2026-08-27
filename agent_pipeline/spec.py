@@ -137,6 +137,12 @@ class Criterion:
     run: str | None = None
     ask: str | None = None
     blocking: bool = True
+    # How many DISTINCT authors must independently record a passing verdict.
+    # The engine cannot spawn judges — but it can refuse to let one voice count
+    # as three, so the only honest way past independence: 3 is three separate
+    # judges with three --by names. Mechanical criteria are always 1: the
+    # engine is a single actor and re-running a command is not independence.
+    independence: int = 1
 
     @staticmethod
     def parse(raw: object, where: str) -> "Criterion":
@@ -172,6 +178,14 @@ class Criterion:
         else:
             ask = None
 
+        independence = _as_int(data.get("independence"), "independence", seat, 1)
+        if independence < 1:
+            raise SpecError(f"{seat}: 'independence' must be >= 1, got {independence}")
+        if kind == "mechanical" and independence != 1:
+            raise SpecError(
+                f"{seat}: 'independence' does not apply to mechanical criteria — the "
+                f"engine is one actor, and re-running a command is not independence"
+            )
         return Criterion(
             id=cid,
             kind=kind,  # type: ignore[arg-type]
@@ -179,6 +193,7 @@ class Criterion:
             run=run,
             ask=ask,
             blocking=_as_bool(data.get("blocking"), "blocking", seat, True),
+            independence=independence,
         )
 
 

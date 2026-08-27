@@ -298,6 +298,12 @@ $ agent-pipeline complete research
       → research.md: found 0 match(es) for sources, need at least 3
 ```
 
+**Panels.** `independence: 3` on a judged criterion demands three passing
+verdicts from three *distinct* judges — the ledger keeps one verdict per author,
+so a single voice re-recording replaces itself and the tally stays at 1/3. The
+engine can't spawn subagents; it can refuse to count a monologue as a panel,
+which makes spawning them the only way through. Fresh eyes, enforced structurally.
+
 The failure mode of judged criteria is that everything passes, and that happens when the question can be answered with an adjective. Demand a quote, a name, or a number — [docs/04-criteria.md](docs/04-criteria.md).
 
 ## Staleness

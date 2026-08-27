@@ -199,23 +199,35 @@ def _evaluate(
             )
         return
 
-    existing = ledger.phases.get(phase.id, None)
-    verdict = existing.verdict(criterion.id) if existing else None
-    if verdict is None:
-        verb = "judge" if criterion.kind == "judged" else "approve"
-        report.add(
-            "criterion-unanswered",
-            f"[{criterion.id}] {criterion.description} — no verdict recorded.",
-            f"Answer it and record the result: {verb} {phase.id} {criterion.id} "
-            f"--status pass --evidence '...'",
-        )
-        return
-    if not verdict.passed():
+    entry = ledger.phases.get(phase.id)
+    panel = entry.panel(criterion.id) if entry else []
+    verb = "judge" if criterion.kind == "judged" else "approve"
+
+    fails = [v for v in panel if not v.passed()]
+    if fails:
+        worst = max(fails, key=lambda v: v.recorded_at)
         report.add(
             "criterion-failed",
-            f"[{criterion.id}] {criterion.description} — recorded FAIL.",
-            verdict.evidence.strip()[:600],
+            f"[{criterion.id}] {criterion.description} — FAIL by {worst.by}.",
+            worst.evidence.strip()[:600],
         )
+        return
+
+    # The panel holds at most one verdict per author (the ledger enforces it),
+    # so len(panel) IS the count of distinct passing judges.
+    need = criterion.independence
+    if len(panel) < need:
+        if not panel:
+            msg = f"[{criterion.id}] {criterion.description} — no verdict recorded."
+        else:
+            who = ", ".join(v.by for v in panel)
+            msg = (f"[{criterion.id}] {criterion.description} — {len(panel)}/{need} "
+                   f"independent verdicts (so far: {who}).")
+        hint = (f"{verb} {phase.id} {criterion.id} --status pass --evidence '...'"
+                if need == 1 else
+                f"{verb} {phase.id} {criterion.id} --status pass --by <distinct-name> "
+                f"--evidence '...' — a repeated --by replaces, it does not add")
+        report.add("criterion-unanswered", msg, hint)
 
 
 def run_mechanical(criterion: Criterion, phase: Phase, ctx: Context) -> Verdict:

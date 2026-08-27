@@ -61,6 +61,12 @@ Four rules:
    checked, which is worse than no record.
 4. **Never assert a mechanical criterion.** The engine runs those and will
    refuse your opinion. Fix the artifact instead.
+5. **`independence: N` means N distinct judges.** Spawn a fresh subagent per
+   verdict and give each a distinct `--by` name — re-recording under one name
+   replaces that verdict, it does not add. The refusal shows the tally
+   (`1/3 independent verdicts`). Never satisfy a panel by inventing names for
+   work one context did: the point is fresh eyes, and the ledger records who
+   judged what.
 
 A `human` criterion is not yours to answer. Present what is being approved,
 the cost of proceeding, and the question — then stop and wait.

@@ -152,7 +152,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"      {p.id}{blk}{opt}{deps}")
         for c in p.criteria:
             flag = "" if c.blocking else " advisory"
-            print(f"          · {c.id} ({c.kind}){flag}")
+            times = f" ×{c.independence}" if c.independence > 1 else ""
+            print(f"          · {c.id} ({c.kind}{times}){flag}")
         # A phase with neither an artifact nor a blocking criterion has nothing
         # the engine can evaluate — it would complete on the say-so of whoever
         # asked, which is the exact hole this whole engine exists to close.
@@ -203,7 +204,8 @@ def cmd_guide(args: argparse.Namespace) -> int:
         print("\n  This phase will be judged against:")
         for c in phase.criteria:
             mark = "" if c.blocking else "  (advisory)"
-            print(f"    [{c.kind}] {c.id}{mark}")
+            panel = f" — requires {c.independence} independent verdicts" if c.independence > 1 else ""
+            print(f"    [{c.kind}] {c.id}{mark}{panel}")
             print(f"        {c.description}")
             if c.kind == "mechanical" and c.run:
                 print(f"        engine runs: {c.run}")
@@ -298,6 +300,7 @@ def _record(args: argparse.Namespace, kind: str, by: str) -> int:
         print("  a passing verdict needs --evidence. 'It looks fine' is not a record.")
         return EXIT_BAD_REQUEST
 
+    author = args.by or by
     ledger.record_verdict(
         phase.id,
         Verdict(
@@ -306,12 +309,19 @@ def _record(args: argparse.Namespace, kind: str, by: str) -> int:
             status=args.status,
             evidence=evidence,
             recorded_at=now_iso(),
-            by=args.by or by,
+            by=author,
         ),
     )
     ledger.save(ctx.workdir)
     mark = "✓" if args.status == "pass" else "✗"
-    print(f"  {mark} recorded {args.status} on {phase.id}/{criterion.id}")
+    tally = ""
+    if criterion.independence > 1:
+        passes = [v for v in ledger.entry(phase.id).panel(criterion.id) if v.passed()]
+        tally = f"  ({len(passes)}/{criterion.independence} independent)"
+        if not args.by:
+            print(f"  note: '{criterion.id}' needs {criterion.independence} DISTINCT judges — "
+                  f"pass --by <name>; a repeated author replaces their own verdict, it does not add.")
+    print(f"  {mark} recorded {args.status} on {phase.id}/{criterion.id} by {author}{tally}")
     return EXIT_OK
 
 

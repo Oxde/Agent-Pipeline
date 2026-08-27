@@ -36,6 +36,19 @@ phases:
   - id: review
     block: review
     depends_on: [draft]
+    # A same-id criterion override, upgraded to a PANEL: two distinct judges
+    # must independently record pass (distinct --by names — one voice judging
+    # twice replaces itself, it does not add). A reviewer with fresh context
+    # is less biased than the author defending their own work.
+    criteria:
+      - id: adversarial
+        kind: judged
+        independence: 2
+        description: The review attempted to break the work, not to approve it.
+        ask: >
+          Does this review name at least one concrete defect with a location,
+          or explicitly state what was checked and why nothing was found?
+          Vague approval answers FAIL.
 
   - id: revise
     block: creative

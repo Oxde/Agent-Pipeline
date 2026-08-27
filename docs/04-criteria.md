@@ -99,6 +99,38 @@ applies to.
 Put a human criterion immediately before anything expensive or irreversible.
 That is where a two-minute stop saves the most.
 
+## independence: N — panels of judges
+
+```yaml
+- id: adversarial
+  kind: judged
+  independence: 3
+  description: Three independent reads agree this holds up.
+  ask: Name one concrete defect with a location, or state what you checked.
+```
+
+`independence: 3` demands **three passing verdicts from three distinct authors**
+(`--by` names). The ledger keeps at most one verdict per author per criterion —
+re-judging replaces your own answer — so one voice recording three times still
+counts as one, and the refusal says so:
+
+```
+✗ [adversarial] … — 1/3 independent verdicts (so far: alice).
+    → judge review adversarial --status pass --by <distinct-name> --evidence '...'
+```
+
+The engine cannot spawn judges. What it can do is refuse to count a monologue
+as a panel — which makes actually spawning independent judges the only honest
+way through. Any recorded FAIL blocks regardless of how many passes exist; a
+judge may change their own mind by re-recording.
+
+Applies to `judged` and `human` (two-person sign-off). Not to `mechanical` —
+the engine is one actor, and re-running a command is not independence.
+
+Why bother: a reviewer with fresh context is not influenced by the author's
+reasoning. Work judged by the agent that produced it gets the author's
+generosity; a panel is how you buy fresh eyes structurally instead of by habit.
+
 ## blocking: false
 
 ```yaml

@@ -61,12 +61,17 @@ def render_status(pipeline: Pipeline, ledger: Ledger, ctx: Context, *, verbose: 
 
         if verbose and phase.criteria:
             for c in phase.criteria:
-                v = entry.verdict(c.id) if entry else None
-                if v is None:
+                panel = entry.panel(c.id) if entry else []
+                fails = [x for x in panel if not x.passed()]
+                if not panel:
                     sym, note = "·", "no verdict"
+                elif fails:
+                    sym, note = "✗", f"fail by {max(fails, key=lambda x: x.recorded_at).by}"
                 else:
-                    sym = "✓" if v.passed() else "✗"
-                    note = f"{v.status} by {v.by}"
+                    who = ", ".join(x.by for x in panel)
+                    tally = f" ({len(panel)}/{c.independence})" if c.independence > 1 else ""
+                    sym = "✓" if len(panel) >= c.independence else "◐"
+                    note = f"pass by {who}{tally}"
                 opt = "" if c.blocking else " (advisory)"
                 lines.append(f"        {sym} {c.id:<24} {c.kind:<11} {note}{opt}")
 

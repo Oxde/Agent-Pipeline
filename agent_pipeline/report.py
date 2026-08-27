@@ -219,14 +219,15 @@ def _phase_rows(view: RunView) -> str:
             detail += f'<div class="block"><b>Blocked</b>{items}</div>'
         if entry and entry.verdicts:
             vs = []
-            for cid, v in entry.verdicts.items():
-                mark = "✓" if v.passed() else "✗"
-                vs.append(
-                    f'<div class="v"><span class="k">{mark} {e(cid)}</span>'
-                    f'<span class="ev">{e(v.evidence[:180] or "—")}</span>'
-                    f'<span class="dim">— {e(v.by)}</span></div>'
-                )
-            detail += (f'<details><summary>{len(entry.verdicts)} verdict(s)</summary>'
+            for cid, panel in entry.verdicts.items():
+                for v in panel:
+                    mark = "✓" if v.passed() else "✗"
+                    vs.append(
+                        f'<div class="v"><span class="k">{mark} {e(cid)}</span>'
+                        f'<span class="ev">{e(v.evidence[:180] or "—")}</span>'
+                        f'<span class="dim">— {e(v.by)}</span></div>'
+                    )
+            detail += (f'<details><summary>{len(vs)} verdict(s)</summary>'
                        f'{"".join(vs)}</details>')
 
         rows.append(

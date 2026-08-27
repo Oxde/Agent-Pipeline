@@ -463,7 +463,7 @@ class TestSubprocessWrites(Harness):
         in_memory.entry("a").status = "active"
 
         absorbed = in_memory.absorb_external(workdir)
-        self.assertEqual(absorbed, ["a/judged-one"])
+        self.assertEqual(absorbed, ["a/judged-one@agent"])
         self.assertEqual(in_memory.entry("a").verdict("judged-one").by, "agent")
 
         in_memory.save(workdir)
@@ -497,6 +497,146 @@ class TestSubprocessWrites(Harness):
     def test_absorbing_from_an_empty_workdir_is_harmless(self) -> None:
         mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
         self.assertEqual(mem.absorb_external(self.root / "nope"), [])
+
+
+class TestIndependence(Harness):
+    """independence: N — a panel of distinct judges, enforced by refusal."""
+
+    PIPE = """
+        name: p
+        workdir: runs/{run}
+        phases:
+          - id: a
+            artifact: "{workdir}/a.md"
+            criteria:
+              - id: panel
+                kind: judged
+                description: Three independent reads agree.
+                ask: Real?
+                independence: 3
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.p = self.pipeline(self.PIPE)
+        self.ctx = self.context()
+        self.ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        e = self.ledger.entry("a")
+        e.status = "active"
+        e.started_at = now_iso()
+        write(self.ctx.workdir / "a.md", "content that exists\n")
+
+    def judge(self, by: str, status: str = "pass") -> None:
+        self.ledger.record_verdict("a", Verdict(
+            criterion="panel", kind="judged", status=status,
+            evidence=f"{by} looked", recorded_at=now_iso(), by=by,
+        ))
+
+    def report(self):
+        return check_can_complete(self.p, self.ledger, self.p.phase("a"), self.ctx)
+
+    def test_partial_panel_blocks_with_a_tally(self) -> None:
+        self.judge("alice")
+        r = self.report()
+        self.assertFalse(r.ok)
+        msg = " ".join(f.message for f in r.failures)
+        self.assertIn("1/3", msg)
+        self.assertIn("alice", msg)
+
+    def test_one_voice_cannot_pretend_to_be_three(self) -> None:
+        # Same author judging three times replaces their own verdict each time.
+        for _ in range(3):
+            self.judge("alice")
+        r = self.report()
+        self.assertFalse(r.ok)
+        self.assertIn("1/3", " ".join(f.message for f in r.failures))
+
+    def test_three_distinct_judges_unblock(self) -> None:
+        for who in ("alice", "bob", "carol"):
+            self.judge(who)
+        self.assertTrue(self.report().ok, [f.message for f in self.report().failures])
+
+    def test_any_fail_blocks_regardless_of_passes(self) -> None:
+        for who in ("alice", "bob", "carol"):
+            self.judge(who)
+        self.judge("dave", status="fail")
+        r = self.report()
+        self.assertFalse(r.ok)
+        self.assertIn("FAIL by dave", " ".join(f.message for f in r.failures))
+
+    def test_a_judge_may_change_their_own_mind(self) -> None:
+        self.judge("alice", status="fail")
+        self.assertFalse(self.report().ok)
+        self.judge("alice", status="pass")   # replaces the fail
+        for who in ("bob", "carol"):
+            self.judge(who)
+        self.assertTrue(self.report().ok)
+
+
+class TestIndependenceSpec(Harness):
+    def test_mechanical_independence_is_rejected(self) -> None:
+        with self.assertRaises(SpecError) as cm:
+            self.pipeline("""
+                name: p
+                phases:
+                  - id: a
+                    artifact: "{workdir}/a.md"
+                    criteria:
+                      - id: x
+                        kind: mechanical
+                        description: Nope.
+                        run: echo ok
+                        independence: 2
+            """)
+        self.assertIn("does not apply to mechanical", str(cm.exception))
+
+    def test_zero_independence_is_rejected(self) -> None:
+        with self.assertRaises(SpecError):
+            self.pipeline("""
+                name: p
+                phases:
+                  - id: a
+                    artifact: "{workdir}/a.md"
+                    criteria:
+                      - id: x
+                        kind: judged
+                        description: Nope.
+                        ask: Real?
+                        independence: 0
+            """)
+
+
+class TestSchemaMigration(Harness):
+    def test_v1_ledger_loads_and_saves_as_v2(self) -> None:
+        # A v1 ledger stores ONE verdict per criterion, not a panel.
+        workdir = self.root / "runs" / "t1"
+        v1 = {
+            "schema": 1, "pipeline": "p", "run": "t1",
+            "created_at": "2026-08-27T00:00:00+00:00", "iteration": 1,
+            "phases": {"a": {
+                "status": "complete", "started_at": None, "completed_at": None,
+                "artifact": None, "iteration": 1, "forced": False,
+                "verdicts": {"x": {
+                    "criterion": "x", "kind": "judged", "status": "pass",
+                    "evidence": "old world", "recorded_at": "2026-08-27T00:00:00+00:00",
+                    "by": "judge",
+                }},
+                "history": [], "notes": [], "cost_usd": 0.5,
+            }},
+        }
+        path = workdir / ".pipeline" / "ledger.json"
+        write(path, "placeholder")
+        path.write_text(__import__("json").dumps(v1), encoding="utf-8")
+
+        ledger = Ledger.load(workdir, "p", "t1")
+        self.assertEqual(len(ledger.entry("a").panel("x")), 1)
+        self.assertEqual(ledger.entry("a").verdict("x").evidence, "old world")
+        self.assertEqual(ledger.entry("a").cost_usd, 0.5)
+
+        ledger.save(workdir)
+        raw = __import__("json").loads(path.read_text())
+        self.assertEqual(raw["schema"], 2)
+        self.assertIsInstance(raw["phases"]["a"]["verdicts"]["x"], list)
 
 
 if __name__ == "__main__":
