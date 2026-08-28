@@ -10,11 +10,13 @@ say-so, that staleness is detected, and that reopening is surgical.
 from __future__ import annotations
 
 import os
+import io
 import sys
 import tempfile
 import textwrap
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +35,7 @@ from agent_pipeline import (  # noqa: E402
     now_iso,
 )
 from agent_pipeline.spec import SpecError  # noqa: E402
+from agent_pipeline.cli import main as cli_main  # noqa: E402
 
 
 def write(path: Path, text: str) -> Path:
@@ -390,6 +393,25 @@ class TestStaleness(Harness):
         report = check_can_ship(p, ledger, ctx)
         self.assertIn("phase-forced", [f.code for f in report.failures])
 
+    def test_active_stale_phase_reports_both_reasons_it_cannot_ship(self) -> None:
+        p = self.pipeline(self.PIPE)
+        ctx = self.context()
+        ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+
+        write(ctx.workdir / "down.md", "built from the old upstream\n")
+        time.sleep(0.02)
+        write(ctx.workdir / "up.md", "new upstream\n")
+        ledger.entry("up").status = "complete"
+        ledger.entry("down").status = "active"
+
+        report = check_can_ship(p, ledger, ctx)
+        codes = [f.code for f in report.failures]
+        self.assertIn("phase-incomplete", codes)
+        self.assertIn("phase-stale", codes)
+        stale = next(f for f in report.failures if f.code == "phase-stale")
+        self.assertIn("up", stale.message)
+        self.assertIn("rebuild", stale.hint.lower())
+
 
 class TestReopenScope(Harness):
     def test_dependents_are_transitive_but_not_greedy(self) -> None:
@@ -440,6 +462,48 @@ class TestLedgerRoundTrip(Harness):
         self.assertEqual(len(again.entry("a").history), 1)
         self.assertEqual(again.total_cost(), 1.25)
 
+    def test_rejudging_preserves_the_replaced_verdict_in_history(self) -> None:
+        workdir = self.root / "runs" / "t1"
+        ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        ledger.record_verdict("a", Verdict(
+            criterion="x", kind="judged", status="fail",
+            evidence="first answer", recorded_at="2026-08-27T00:00:00+00:00",
+            by="same-reviewer",
+        ))
+        ledger.record_verdict("a", Verdict(
+            criterion="x", kind="judged", status="pass",
+            evidence="second answer", recorded_at="2026-08-27T00:01:00+00:00",
+            by="same-reviewer",
+        ))
+        ledger.save(workdir)
+
+        again = Ledger.load(workdir, "p", "t1")
+        self.assertEqual(len(again.entry("a").panel("x")), 1)
+        self.assertEqual(again.entry("a").verdict("x").evidence, "second answer")
+        replacement = again.entry("a").history[-1]
+        self.assertEqual(replacement["event"], "verdict-replaced")
+        self.assertEqual(replacement["criterion"], "x")
+        self.assertEqual(replacement["by"], "same-reviewer")
+        self.assertEqual(replacement["previous"]["evidence"], "first answer")
+        self.assertEqual(replacement["replacement"]["evidence"], "second answer")
+
+    def test_non_mechanical_verdict_replaced_by_mechanical_is_archived(self) -> None:
+        for kind in ("judged", "human"):
+            with self.subTest(kind=kind):
+                ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+                ledger.record_verdict("a", Verdict(
+                    criterion="x", kind=kind, status="pass", evidence="decision",
+                    recorded_at="2026-08-27T00:00:00+00:00", by="same-reviewer",
+                ))
+                ledger.record_verdict("a", Verdict(
+                    criterion="x", kind="mechanical", status="fail", evidence="refresh",
+                    recorded_at="2026-08-27T00:01:00+00:00", by="same-reviewer",
+                ))
+
+                replacement = ledger.entry("a").history[-1]
+                self.assertEqual(replacement["previous"]["kind"], kind)
+                self.assertEqual(replacement["replacement"]["kind"], "mechanical")
+
 
 class TestSubprocessWrites(Harness):
     """Runner mode must not clobber ledger writes made by the phase command.
@@ -470,6 +534,35 @@ class TestSubprocessWrites(Harness):
         reloaded = Ledger.load(workdir, "p", "t1")
         self.assertIsNotNone(reloaded.entry("a").verdict("judged-one"))
 
+    def test_replacement_history_written_by_phase_command_survives(self) -> None:
+        workdir = self.root / "runs" / "t1"
+        mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        mem.record_verdict("a", Verdict(
+            criterion="c", kind="judged", status="fail", evidence="original",
+            recorded_at="2026-08-27T00:00:00+00:00", by="agent",
+        ))
+        mem.record_verdict("a", Verdict(
+            criterion="c", kind="judged", status="pass", evidence="parent replacement",
+            recorded_at="2026-08-27T00:01:00+00:00", by="agent",
+        ))
+        mem.save(workdir)
+
+        disk = Ledger.load(workdir, "p", "t1")
+        disk.record_verdict("a", Verdict(
+            criterion="c", kind="judged", status="fail", evidence="subprocess replacement",
+            recorded_at="2026-08-27T00:02:00+00:00", by="agent",
+        ))
+        disk.entry("a").history[-1]["archived_at"] = "2030-01-01T00:00:00+00:00"
+        expected_history = disk.entry("a").history
+        disk.save(workdir)
+
+        mem.absorb_external(workdir)
+        mem.save(workdir)
+        reloaded = Ledger.load(workdir, "p", "t1")
+
+        self.assertEqual(reloaded.entry("a").history, expected_history)
+        self.assertEqual(len(reloaded.entry("a").history), 2)
+
     def test_a_newer_verdict_on_disk_wins(self) -> None:
         workdir = self.root / "runs" / "t1"
         stale = Verdict(criterion="c", kind="judged", status="fail",
@@ -485,6 +578,28 @@ class TestSubprocessWrites(Harness):
         mem.absorb_external(workdir)
         self.assertEqual(mem.entry("a").verdict("c").by, "new")
 
+    def test_equal_timestamp_disk_verdict_does_not_collide(self) -> None:
+        workdir = self.root / "runs" / "t1"
+        timestamp = "2026-08-27T00:00:00+00:00"
+        mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        mem.record_verdict("a", Verdict(
+            criterion="c", kind="judged", status="fail", evidence="parent",
+            recorded_at=timestamp, by="agent",
+        ))
+        mem.save(workdir)
+
+        disk = Ledger.load(workdir, "p", "t1")
+        disk.record_verdict("a", Verdict(
+            criterion="c", kind="judged", status="pass", evidence="subprocess",
+            recorded_at=timestamp, by="agent",
+        ))
+        disk.save(workdir)
+
+        absorbed = mem.absorb_external(workdir)
+
+        self.assertEqual(absorbed, ["a/c@agent"])
+        self.assertEqual(mem.entry("a").verdict("c").evidence, "subprocess")
+
     def test_cost_logged_by_the_phase_command_survives(self) -> None:
         workdir = self.root / "runs" / "t1"
         disk = Ledger(pipeline="p", run="t1", created_at=now_iso())
@@ -497,6 +612,172 @@ class TestSubprocessWrites(Harness):
     def test_absorbing_from_an_empty_workdir_is_harmless(self) -> None:
         mem = Ledger(pipeline="p", run="t1", created_at=now_iso())
         self.assertEqual(mem.absorb_external(self.root / "nope"), [])
+
+
+class TestCriterionKindTransitions(Harness):
+    """A verdict only answers the criterion kind it was recorded for."""
+
+    def pipeline_for(self, kind: str, *, independence: int = 1):
+        kind_fields = {
+            "mechanical": "run: /usr/bin/true",
+            "judged": "ask: Is it ready?",
+            "human": "ask: Do you approve?",
+        }[kind]
+        independence_field = f"independence: {independence}" if independence > 1 else ""
+        return self.pipeline(f"""
+            name: p
+            workdir: runs/{{run}}
+            phases:
+              - id: a
+                artifact: "{{workdir}}/a.md"
+                criteria:
+                  - id: approval
+                    kind: {kind}
+                    description: The artifact is approved.
+                    {kind_fields}
+                    {independence_field}
+        """)
+
+    def persisted_ledger(self, verdict: Verdict) -> tuple[Ledger, Context]:
+        ctx = self.context()
+        ledger = Ledger(pipeline="p", run="t1", created_at=now_iso())
+        ledger.entry("a").status = "active"
+        ledger.record_verdict("a", verdict)
+        ledger.save(ctx.workdir)
+        write(ctx.workdir / "a.md", "persisted artifact\n")
+        return Ledger.load(ctx.workdir, "p", "t1"), ctx
+
+    def persisted_v1_ledger(self, verdict: Verdict) -> tuple[Ledger, Context]:
+        ctx = self.context()
+        raw = {
+            "schema": 1, "pipeline": "p", "run": "t1",
+            "created_at": "2026-08-27T00:00:00+00:00", "iteration": 1,
+            "phases": {"a": {
+                "status": "active", "started_at": None, "completed_at": None,
+                "artifact": None, "iteration": 1, "forced": False,
+                "verdicts": {verdict.criterion: verdict.__dict__},
+                "history": [], "notes": [], "cost_usd": 0,
+            }},
+        }
+        path = Ledger.path_for(ctx.workdir)
+        write(path, __import__("json").dumps(raw))
+        write(ctx.workdir / "a.md", "persisted artifact\n")
+        return Ledger.load(ctx.workdir, "p", "t1"), ctx
+
+    def test_judged_pass_does_not_satisfy_a_later_human_criterion(self) -> None:
+        pipeline = self.pipeline_for("human")
+        ledger, ctx = self.persisted_ledger(Verdict(
+            criterion="approval", kind="judged", status="pass",
+            evidence="model approved the old criterion",
+            recorded_at="2026-08-27T00:00:00+00:00", by="judge",
+        ))
+
+        report = check_can_complete(pipeline, ledger, pipeline.phase("a"), ctx)
+
+        self.assertFalse(report.ok)
+        self.assertIn("criterion-unanswered", [f.code for f in report.failures])
+        self.assertEqual(ledger.entry("a").panel("approval")[0].kind, "judged")
+        status = __import__("agent_pipeline").render_status(pipeline, ledger, ctx, verbose=True)
+        self.assertIn("human       no verdict", status)
+        self.assertNotIn("pass by judge", status)
+
+        ledger.record_verdict("a", Verdict(
+            criterion="approval", kind="human", status="pass",
+            evidence="human approved the current criterion",
+            recorded_at="2026-08-27T00:01:00+00:00", by="human",
+        ))
+        ledger.save(ctx.workdir)
+        reloaded = Ledger.load(ctx.workdir, "p", "t1")
+        self.assertEqual(
+            {verdict.kind for verdict in reloaded.entry("a").panel("approval")},
+            {"judged", "human"},
+        )
+        self.assertEqual(
+            [verdict.by for verdict in reloaded.entry("a").current_panel("approval", "human")],
+            ["human"],
+        )
+        self.assertTrue(
+            check_can_complete(pipeline, reloaded, pipeline.phase("a"), ctx).ok
+        )
+
+    def test_human_pass_does_not_count_toward_a_later_judged_panel(self) -> None:
+        pipeline = self.pipeline_for("judged", independence=2)
+        ledger, ctx = self.persisted_ledger(Verdict(
+            criterion="approval", kind="human", status="pass",
+            evidence="human approved the old criterion",
+            recorded_at="2026-08-27T00:00:00+00:00", by="human",
+        ))
+
+        report = check_can_complete(pipeline, ledger, pipeline.phase("a"), ctx)
+
+        self.assertFalse(report.ok)
+        failure = next(f for f in report.failures if f.code == "criterion-unanswered")
+        self.assertIn("no verdict recorded", failure.message)
+        self.assertNotIn("1/2", failure.message)
+        self.assertNotIn("human", failure.message)
+        status = __import__("agent_pipeline").render_status(pipeline, ledger, ctx, verbose=True)
+        self.assertIn("judged      no verdict", status)
+        self.assertNotIn("pass by human", status)
+
+    def test_v1_mechanical_pass_does_not_count_toward_a_later_judged_panel(self) -> None:
+        pipeline = self.pipeline_for("judged", independence=2)
+        ledger, ctx = self.persisted_v1_ledger(Verdict(
+            criterion="approval", kind="mechanical", status="pass",
+            evidence="the old command exited zero",
+            recorded_at="2026-08-27T00:00:00+00:00", by="engine",
+        ))
+
+        report = check_can_complete(pipeline, ledger, pipeline.phase("a"), ctx)
+
+        self.assertFalse(report.ok)
+        failure = next(f for f in report.failures if f.code == "criterion-unanswered")
+        self.assertIn("no verdict recorded", failure.message)
+        self.assertNotIn("1/2", failure.message)
+        self.assertNotIn("engine", failure.message)
+        self.assertEqual(ledger.entry("a").panel("approval")[0].kind, "mechanical")
+
+    def test_mechanical_fail_does_not_fail_a_later_human_criterion(self) -> None:
+        pipeline = self.pipeline_for("human")
+        ledger, ctx = self.persisted_ledger(Verdict(
+            criterion="approval", kind="mechanical", status="fail",
+            evidence="the old command failed",
+            recorded_at="2026-08-27T00:00:00+00:00", by="engine",
+        ))
+
+        report = check_can_complete(pipeline, ledger, pipeline.phase("a"), ctx)
+
+        self.assertFalse(report.ok)
+        self.assertIn("criterion-unanswered", [f.code for f in report.failures])
+        self.assertNotIn("criterion-failed", [f.code for f in report.failures])
+        status = __import__("agent_pipeline").render_status(pipeline, ledger, ctx, verbose=True)
+        self.assertIn("human       no verdict", status)
+        self.assertNotIn("fail by engine", status)
+
+    def test_judge_command_tally_excludes_an_old_human_verdict(self) -> None:
+        self.pipeline_for("judged", independence=2)
+        ledger, ctx = self.persisted_ledger(Verdict(
+            criterion="approval", kind="human", status="pass",
+            evidence="human approved the old criterion",
+            recorded_at="2026-08-27T00:00:00+00:00", by="human",
+        ))
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout):
+            result = cli_main([
+                "--root", str(self.root), "--run", "t1",
+                "judge", "a", "approval", "--status", "pass",
+                "--evidence", "model approved the current criterion",
+            ])
+
+        self.assertEqual(result, 0)
+        self.assertIn("by judge", stdout.getvalue())
+        self.assertIn("(1/2 independent)", stdout.getvalue())
+        reloaded = Ledger.load(ctx.workdir, "p", "t1")
+        self.assertEqual(len(reloaded.entry("a").panel("approval")), 2)
+        self.assertEqual(
+            [v.by for v in reloaded.entry("a").current_panel("approval", "judged")],
+            ["judge"],
+        )
 
 
 class TestIndependence(Harness):

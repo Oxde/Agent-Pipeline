@@ -110,9 +110,10 @@ That is where a two-minute stop saves the most.
 ```
 
 `independence: 3` demands **three passing verdicts from three distinct authors**
-(`--by` names). The ledger keeps at most one verdict per author per criterion —
-re-judging replaces your own answer — so one voice recording three times still
-counts as one, and the refusal says so:
+(`--by` names). The ledger keeps at most one current verdict per author per
+criterion, so one voice recording three times still counts as one. Re-judging
+replaces that author's current answer, while the replaced answer remains in the
+phase history for audit. The refusal shows the distinct-author tally:
 
 ```
 ✗ [adversarial] … — 1/3 independent verdicts (so far: alice).

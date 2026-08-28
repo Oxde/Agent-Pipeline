@@ -321,7 +321,10 @@ def _record(args: argparse.Namespace, kind: str, by: str) -> int:
     mark = "✓" if args.status == "pass" else "✗"
     tally = ""
     if criterion.independence > 1:
-        passes = [v for v in ledger.entry(phase.id).panel(criterion.id) if v.passed()]
+        passes = [
+            v for v in ledger.entry(phase.id).current_panel(criterion.id, criterion.kind)
+            if v.passed()
+        ]
         tally = f"  ({len(passes)}/{criterion.independence} independent)"
         if not args.by:
             print(f"  note: '{criterion.id}' needs {criterion.independence} DISTINCT judges — "

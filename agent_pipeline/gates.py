@@ -219,7 +219,7 @@ def _evaluate(
         return
 
     entry = ledger.phases.get(phase.id)
-    panel = entry.panel(criterion.id) if entry else []
+    panel = entry.current_panel(criterion.id, criterion.kind) if entry else []
     verb = "judge" if criterion.kind == "judged" else "approve"
 
     fails = [v for v in panel if not v.passed()]
@@ -335,16 +335,27 @@ def check_can_ship(pipeline: Pipeline, ledger: Ledger, ctx: Context) -> GateRepo
     for phase in pipeline.phases:
         entry = ledger.phases.get(phase.id)
         status = entry.status if entry else "pending"
+        stale = stale_against(pipeline, phase, ctx)
         if status != "complete":
             if phase.optional:
                 continue
+            hint = (
+                f"Finish rebuilding {phase.id}, then run: complete {phase.id}"
+                if status == "active"
+                else f"Run: start {phase.id} → produce its artifact → complete {phase.id}"
+            )
             report.add(
                 "phase-incomplete",
-                f"required phase '{phase.id}' ({phase.name}) is {status}.",
-                f"Run: start {phase.id} … complete {phase.id}",
+                f"required phase '{phase.id}' ({phase.name}) is {status}; only completed phases can ship.",
+                hint,
             )
+            if stale:
+                report.add(
+                    "phase-stale",
+                    f"'{phase.id}' is {status}, and its artifact predates: {', '.join(stale)}.",
+                    f"Rebuild {phase.id} from the current upstream artifact, then complete it.",
+                )
             continue
-        stale = stale_against(pipeline, phase, ctx)
         if stale:
             report.add(
                 "phase-stale",

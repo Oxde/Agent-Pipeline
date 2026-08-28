@@ -18,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 PACKAGE_ROOT = REPO_ROOT / "agent_pipeline"
 
-from agent_pipeline import Context, Ledger, load_blocks, load_pipeline, now_iso  # noqa: E402
+from agent_pipeline import Context, Ledger, Verdict, load_blocks, load_pipeline, now_iso  # noqa: E402
 from agent_pipeline.notify import Hook, build_message, emit  # noqa: E402
 from agent_pipeline.report import build_view, find_ledgers, render_page  # noqa: E402
 from agent_pipeline.spec import SpecError  # noqa: E402
@@ -189,6 +189,34 @@ class TestReport(Base):
         ledger.entry("b").status = "active"
         build_view(p, ledger, ctx)
         self.assertEqual(ledger.entry("b").verdicts, {})
+
+    def test_mismatched_verdict_is_shown_as_inactive_not_current_approval(self) -> None:
+        p = self.pipeline("""
+            name: rep
+            workdir: runs/{run}
+            phases:
+              - id: a
+                artifact: "{workdir}/a.md"
+                criteria:
+                  - id: approval
+                    kind: human
+                    description: A person approves.
+        """)
+        workdir = self.root / "runs" / "t1"
+        ctx = Context(root=self.root, run="t1", workdir=workdir, engine=PACKAGE_ROOT)
+        ledger = Ledger(pipeline="rep", run="t1", created_at=now_iso())
+        ledger.entry("a").status = "active"
+        ledger.record_verdict("a", Verdict(
+            criterion="approval", kind="judged", status="pass",
+            evidence="old model approval", recorded_at=now_iso(), by="judge",
+        ))
+        write(workdir / "a.md", "artifact\n")
+
+        html = render_page([build_view(p, ledger, ctx)])
+
+        self.assertIn("0 current · 1 inactive", html)
+        self.assertIn("inactive judged", html)
+        self.assertNotIn("✓ approval", html)
 
     def test_the_page_is_genuinely_self_contained(self) -> None:
         p, ledger, ctx, workdir = self.make()
