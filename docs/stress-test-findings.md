@@ -16,6 +16,15 @@ That third fix is complete for active-phase completion, CLI tallies, status, and
 
 ## Open security blockers for the main developer agent
 
+> **Disposition (2026-08-28, follow-up on main):** blockers 2 and 3 are fixed —
+> a criterion-ID mismatch in persisted JSON now fails closed at load
+> (`LedgerError`), and duplicate authors in a loaded panel are normalized to the
+> newest verdict per author with differing discards archived to history, so a
+> forged duplicate can no longer inflate an `independence` tally. Blocker 1
+> (completed-phase configuration drift) remains open pending the
+> fingerprint-vs-revalidation design decision.
+
+
 1. **Completed-phase configuration drift:** `check_can_ship` trusts `status: complete` and does not revalidate current criteria. A phase completed with a judged PASS can remain shippable after the criterion changes to human or a new criterion is added. Runner mode also skips completed phases. Recommended direction: persist and compare a normalized phase/spec fingerprint, invalidating or revalidating completed phases when it changes.
 2. **Outer/embedded criterion ID mismatch:** v1/v2 loading accepts a verdict stored under `verdicts["approval"]` even when `Verdict.criterion` is a different ID. Current panel lookup trusts the outer key. Loading should fail closed or current-panel validation must require both IDs to match.
 3. **Duplicate authors in loaded v2 panels:** JSON loading does not enforce the one-verdict-per-author invariant. Two persisted PASS entries with the same `by` can satisfy `independence: 2`. Loading/absorption must reject or deterministically normalize duplicates while preserving discarded entries for audit.

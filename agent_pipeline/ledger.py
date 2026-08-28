@@ -115,12 +115,51 @@ def _entry_dict(e: PhaseEntry) -> dict[str, object]:
     return d
 
 
-def _entry_from(raw: dict[str, object]) -> PhaseEntry:
+def _entry_from(raw: dict[str, object], where: str = "ledger") -> PhaseEntry:
+    """Build a PhaseEntry from persisted JSON — treated as external input.
+
+    The engine only ever writes consistent panels, so an inconsistency here
+    means the file was hand-edited or corrupted. Two cases, two responses:
+
+    - a verdict filed under one criterion key whose own ``criterion`` field
+      names another is unresolvable ambiguity: fail closed (LedgerError),
+      same as invalid JSON — refusing to guess at run state beats guessing.
+    - duplicate authors in one panel would let a single voice inflate an
+      ``independence`` tally: normalize to the newest verdict per author,
+      archiving differing discards to history so the edit stays visible.
+    """
+    history = list(raw.get("history") or [])
     verdicts: dict[str, list[Verdict]] = {}
     for cid, panel in (raw.get("verdicts") or {}).items():
         # v1 stored one verdict per criterion; v2 stores a panel.
         items = panel if isinstance(panel, list) else [panel]
-        verdicts[cid] = [Verdict(**v) for v in items]
+        loaded = [Verdict(**v) for v in items]
+        for v in loaded:
+            if v.criterion != cid:
+                raise LedgerError(
+                    f"{where}: a verdict filed under criterion '{cid}' claims to be "
+                    f"for '{v.criterion}' (by {v.by}). The file is hand-edited or "
+                    f"corrupt — fix it; the engine will not guess which id is real."
+                )
+        deduped: list[Verdict] = []
+        for v in loaded:
+            prior = next((x for x in deduped if x.by == v.by), None)
+            if prior is None:
+                deduped.append(v)
+                continue
+            keep, drop = (v, prior) if v.recorded_at >= prior.recorded_at else (prior, v)
+            if asdict(drop) != asdict(keep):
+                history.append({
+                    "event": "verdict-duplicate-discarded",
+                    "criterion": cid,
+                    "by": drop.by,
+                    "discarded": asdict(drop),
+                    "kept": asdict(keep),
+                    "archived_at": now_iso(),
+                })
+            deduped[:] = [x for x in deduped if x.by != v.by]
+            deduped.append(keep)
+        verdicts[cid] = deduped
     return PhaseEntry(
         status=raw.get("status", "pending"),
         started_at=raw.get("started_at"),
@@ -129,7 +168,7 @@ def _entry_from(raw: dict[str, object]) -> PhaseEntry:
         iteration=int(raw.get("iteration", 1)),
         forced=bool(raw.get("forced", False)),
         verdicts=verdicts,
-        history=list(raw.get("history") or []),
+        history=history,
         notes=list(raw.get("notes") or []),
         cost_usd=float(raw.get("cost_usd", 0.0)),
     )
@@ -177,7 +216,10 @@ class Ledger:
             schema=SCHEMA_VERSION,
             iteration=int(raw.get("iteration", 1)),
             vars={str(k): str(v) for k, v in (raw.get("vars") or {}).items()},
-            phases={pid: _entry_from(e) for pid, e in (raw.get("phases") or {}).items()},
+            phases={
+                pid: _entry_from(e, where=f"{path} phase '{pid}'")
+                for pid, e in (raw.get("phases") or {}).items()
+            },
         )
 
     def save(self, workdir: Path) -> Path:

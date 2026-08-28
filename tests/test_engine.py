@@ -967,5 +967,101 @@ class TestRequiredReading(Harness):
         self.assertEqual(p.phase("a").context, ["docs/rules.md", "docs/extra.md"])
 
 
+class TestLoaderHardening(Harness):
+    """Persisted JSON is external input — mismatches fail closed, forged
+    duplicates are normalized so they cannot inflate an independence tally."""
+
+    def _write_ledger(self, panel: list[dict]) -> Path:
+        import json
+        workdir = self.root / "runs" / "t1"
+        raw = {
+            "schema": 2, "pipeline": "p", "run": "t1",
+            "created_at": "2026-08-28T00:00:00+00:00", "iteration": 1, "vars": {},
+            "phases": {"a": {
+                "status": "active", "started_at": None, "completed_at": None,
+                "artifact": None, "iteration": 1, "forced": False,
+                "verdicts": {"gate": panel}, "history": [], "notes": [],
+                "cost_usd": 0.0,
+            }},
+        }
+        path = workdir / ".pipeline" / "ledger.json"
+        write(path, "x")
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        return workdir
+
+    @staticmethod
+    def _v(by: str, status: str = "pass", at: str = "2026-08-28T01:00:00+00:00",
+           criterion: str = "gate", evidence: str = "e") -> dict:
+        return {"criterion": criterion, "kind": "judged", "status": status,
+                "evidence": evidence, "recorded_at": at, "by": by}
+
+    def test_criterion_id_mismatch_fails_closed(self) -> None:
+        from agent_pipeline.ledger import LedgerError
+        workdir = self._write_ledger([self._v("alice", criterion="other-gate")])
+        with self.assertRaises(LedgerError) as cm:
+            Ledger.load(workdir, "p", "t1")
+        msg = str(cm.exception)
+        self.assertIn("gate", msg)
+        self.assertIn("other-gate", msg)
+        self.assertIn("alice", msg)
+
+    def test_forged_duplicate_author_cannot_inflate_independence(self) -> None:
+        # Two persisted PASS entries under the same author, differing evidence:
+        # the exact forgery from the stress-test report. After load the panel
+        # holds ONE verdict for that author and the gate still refuses 1/2.
+        workdir = self._write_ledger([
+            self._v("alice", at="2026-08-28T01:00:00+00:00", evidence="first"),
+            self._v("alice", at="2026-08-28T02:00:00+00:00", evidence="second"),
+        ])
+        ledger = Ledger.load(workdir, "p", "t1")
+        panel = ledger.entry("a").panel("gate")
+        self.assertEqual(len(panel), 1)
+        self.assertEqual(panel[0].evidence, "second")   # newest kept
+        events = [h for h in ledger.entry("a").history
+                  if h.get("event") == "verdict-duplicate-discarded"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["discarded"]["evidence"], "first")
+
+        p = self.pipeline("""
+            name: p
+            workdir: runs/{run}
+            phases:
+              - id: a
+                artifact: "{workdir}/a.md"
+                criteria:
+                  - id: gate
+                    kind: judged
+                    description: Panel of two.
+                    ask: Real?
+                    independence: 2
+        """)
+        write(self.root / "runs" / "t1" / "a.md", "content\n")
+        ctx = self.context()
+        r = check_can_complete(p, ledger, p.phase("a"), ctx)
+        self.assertFalse(r.ok)
+        self.assertIn("1/2", " ".join(f.message for f in r.failures))
+
+    def test_identical_duplicates_are_dropped_without_history_noise(self) -> None:
+        same = self._v("alice")
+        workdir = self._write_ledger([same, dict(same)])
+        ledger = Ledger.load(workdir, "p", "t1")
+        self.assertEqual(len(ledger.entry("a").panel("gate")), 1)
+        self.assertEqual(ledger.entry("a").history, [])
+
+    def test_normalization_persists_on_next_save(self) -> None:
+        import json
+        workdir = self._write_ledger([
+            self._v("alice", at="2026-08-28T01:00:00+00:00", evidence="first"),
+            self._v("alice", at="2026-08-28T02:00:00+00:00", evidence="second"),
+        ])
+        ledger = Ledger.load(workdir, "p", "t1")
+        ledger.save(workdir)
+        raw = json.loads(Ledger.path_for(workdir).read_text())
+        self.assertEqual(len(raw["phases"]["a"]["verdicts"]["gate"]), 1)
+        again = Ledger.load(workdir, "p", "t1")   # loads clean, no new events
+        self.assertEqual(len([h for h in again.entry("a").history
+                              if h.get("event") == "verdict-duplicate-discarded"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
