@@ -593,6 +593,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-pipeline",
         description="A flexible pipeline engine for any task you need.",
     )
+    from agent_pipeline._version import __version__
+    p.add_argument("--version", action="version", version=f"agent-pipeline {__version__}")
     p.add_argument("--root", default=".", help="project root (default: cwd)")
     p.add_argument("--pipeline", help="pipeline YAML (default: ./pipeline.yaml or ./pipelines/*.yaml)")
     p.add_argument("--run", default="main", help="run id — one ledger per run (default: main)")

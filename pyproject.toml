@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-pipeline"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A flexible pipeline engine for any task you need."
 readme = "README.md"
 license = "MIT"
@@ -26,6 +26,9 @@ agent-pipeline = "agent_pipeline.cli:main"
 
 [tool.setuptools]
 packages = ["agent_pipeline"]
+
+[tool.setuptools.dynamic]
+version = { attr = "agent_pipeline._version.__version__" }
 
 # Blocks and checks ship INSIDE the package so a pip-installed copy is
 # self-contained — {engine} resolves to the installed package either way.

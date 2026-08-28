@@ -16,7 +16,7 @@ from .runner import RunResult, run_pipeline
 from .spec import Block, Criterion, Phase, Pipeline, SpecError, load_blocks, load_pipeline
 from .status import render_report, render_status
 
-__version__ = "0.1.0"
+from ._version import __version__  # noqa: F401
 
 __all__ = [
     "Block",

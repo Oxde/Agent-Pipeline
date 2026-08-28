@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from ._version import __version__
+
 PhaseStatus = Literal["pending", "active", "complete"]
 VerdictStatus = Literal["pass", "fail"]
 
@@ -227,6 +229,7 @@ class Ledger:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema": SCHEMA_VERSION,
+            "engine": __version__,
             "pipeline": self.pipeline,
             "run": self.run,
             "created_at": self.created_at,

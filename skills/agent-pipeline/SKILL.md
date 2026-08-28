@@ -9,7 +9,8 @@ A referee for multi-step work. It never does the work and never decides whether
 an idea is good. It answers three questions only — may this **start**, may this
 **close**, has anything gone **stale** — and when the answer is no, it says why.
 
-Install: `pip install agent-pipeline` · Source: https://github.com/Oxde/Agent-Pipeline
+Install: `pip install git+https://github.com/Oxde/Agent-Pipeline.git` — the bare
+PyPI name `agent-pipeline` is an unrelated package; never install it.
 
 ## Am I in one?
 
