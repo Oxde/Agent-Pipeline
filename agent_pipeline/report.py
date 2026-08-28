@@ -219,15 +219,24 @@ def _phase_rows(view: RunView) -> str:
             detail += f'<div class="block"><b>Blocked</b>{items}</div>'
         if entry and entry.verdicts:
             vs = []
+            current_kinds = {criterion.id: criterion.kind for criterion in phase.criteria}
+            current_count = 0
+            inactive_count = 0
             for cid, panel in entry.verdicts.items():
                 for v in panel:
-                    mark = "✓" if v.passed() else "✗"
+                    active = current_kinds.get(cid) == v.kind
+                    if active:
+                        current_count += 1
+                        label = f'{"✓" if v.passed() else "✗"} {cid}'
+                    else:
+                        inactive_count += 1
+                        label = f"· {cid} (inactive {v.kind})"
                     vs.append(
-                        f'<div class="v"><span class="k">{mark} {e(cid)}</span>'
+                        f'<div class="v"><span class="k">{e(label)}</span>'
                         f'<span class="ev">{e(v.evidence[:180] or "—")}</span>'
                         f'<span class="dim">— {e(v.by)}</span></div>'
                     )
-            detail += (f'<details><summary>{len(vs)} verdict(s)</summary>'
+            detail += (f'<details><summary>{current_count} current · {inactive_count} inactive</summary>'
                        f'{"".join(vs)}</details>')
 
         rows.append(

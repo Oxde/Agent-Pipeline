@@ -73,6 +73,14 @@ class PhaseEntry:
     def panel(self, criterion_id: str) -> list[Verdict]:
         return self.verdicts.get(criterion_id, [])
 
+    def current_panel(self, criterion_id: str, kind: str) -> list[Verdict]:
+        """Verdicts that answer the criterion's current kind.
+
+        Kind-mismatched entries remain in ``verdicts`` as inactive historical
+        evidence, but they cannot satisfy, fail, or add independence to a gate.
+        """
+        return [verdict for verdict in self.panel(criterion_id) if verdict.kind == kind]
+
     def verdict(self, criterion_id: str) -> Verdict | None:
         """The newest verdict on a criterion, any author — the headline view."""
         p = self.panel(criterion_id)
@@ -80,6 +88,23 @@ class PhaseEntry:
 
     def record(self, verdict: Verdict) -> None:
         panel = self.verdicts.setdefault(verdict.criterion, [])
+        replaced = next((v for v in panel if v.by == verdict.by), None)
+        # Mechanical-to-mechanical refreshes are routine and need not grow the
+        # ledger. Preserve a replacement if either side is a human decision.
+        if (
+            replaced is not None
+            and (replaced.kind != "mechanical" or verdict.kind != "mechanical")
+        ):
+            self.history.append(
+                {
+                    "event": "verdict-replaced",
+                    "criterion": verdict.criterion,
+                    "by": verdict.by,
+                    "previous": asdict(replaced),
+                    "replacement": asdict(verdict),
+                    "archived_at": now_iso(),
+                }
+            )
         panel[:] = [v for v in panel if v.by != verdict.by]
         panel.append(verdict)
 
@@ -214,9 +239,22 @@ class Ledger:
                     current = next(
                         (v for v in mine.panel(cid) if v.by == verdict.by), None
                     )
-                    if current is None or verdict.recorded_at > current.recorded_at:
-                        mine.record(verdict)
+                    if (
+                        current is None
+                        or verdict.recorded_at > current.recorded_at
+                        or (
+                            verdict.recorded_at == current.recorded_at
+                            and verdict != current
+                        )
+                    ):
+                        mine.verdicts[cid] = [
+                            v for v in mine.panel(cid) if v.by != verdict.by
+                        ]
+                        mine.verdicts[cid].append(verdict)
                         absorbed.append(f"{pid}/{cid}@{verdict.by}")
+            for event in their.history:
+                if event not in mine.history:
+                    mine.history.append(event)
             if their.cost_usd != mine.cost_usd:
                 mine.cost_usd = their.cost_usd
             for note in their.notes:

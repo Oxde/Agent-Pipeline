@@ -61,7 +61,7 @@ def render_status(pipeline: Pipeline, ledger: Ledger, ctx: Context, *, verbose: 
 
         if verbose and phase.criteria:
             for c in phase.criteria:
-                panel = entry.panel(c.id) if entry else []
+                panel = entry.current_panel(c.id, c.kind) if entry else []
                 fails = [x for x in panel if not x.passed()]
                 if not panel:
                     sym, note = "·", "no verdict"
