@@ -28,6 +28,35 @@ What survives is structure:
 - a check executed by the engine **cannot be forgotten by the agent**
 - a claim is not a verdict — **nothing completes on someone's say-so**
 
+## Why this exists
+
+Three failures from real production runs, none of which any amount of prompting prevented:
+
+- **A gate that never ran.** A piece shipped with one of its validators never executed. Every phase reported done. The instruction to run it lived in a document the agent had read tens of thousands of tokens earlier.
+- **A stale master.** A reviewer watched the *old* cut of a video — the final file had been built from an input that moved three hours later. Nothing was missing, nothing errored, every check was green. Existence was never the right question.
+- **Self-certification.** "I completed phase 3" is a claim. Nothing separated a claim from a verified fact, so a file containing a heading and a TODO counted as finished work.
+
+The two standard answers both fail here.
+
+**"Write sterner instructions"** fails because instructions are the thing that decayed. Emphasis does nothing to a mechanism that was never about emphasis.
+
+**"Take the loop away from the agent"** — orchestration — fails for work where coherence *is* the product. A long piece whose ending has to answer its opening needs one worker holding the whole scope. Chop it into isolated steps with fresh context each and you get something technically complete and internally incoherent.
+
+## Why nothing on the market fills this
+
+Every neighbouring tool sits at a different layer, and the gap between them is where this lives:
+
+| Layer | Examples | Why it can't do this |
+|---|---|---|
+| Orchestrators | LangGraph, CrewAI, n8n, Prefect, Airflow, Temporal | They manage execution **they own** — the framework holds the loop and assembles the context. They cannot referee an agent that runs its own loop, and cannot reach inside another agent's context window. |
+| Harness agents | Hermes, Claude Code | They have the loop, tools, skills and memory — and no process enforcement. Everything is advisory; the agent can ignore all of it. |
+| Dev-process scaffolds | spec-kit, BMAD, superpowers | Shaped for software delivery, and still prose. Same decay. |
+| Visual builders | ComfyUI, Gradio Workflows | Make plumbing correct by construction, but have no notion of judgment — no evidence, no approval, no "this exists but is wrong". |
+
+The strongest evidence the gap is real: teams who feel this pain build a one-off and move on. Nous Research hit it twice — `autonovel` (a bespoke `run_pipeline.py` + `state.json`, no licence file) and `kanban-video-pipeline` (four agent profiles on a board that trusts "done") — rather than adopt a general harness, because there wasn't one.
+
+Nobody built the middle layer because it requires holding two beliefs that look opposed: that an agent **should** keep the whole scope in one head, *and* that it **cannot** be trusted to certify its own work. Take only the first and you get advisory process. Take only the second and you shred the context that made the work good. The referee position — the agent keeps the loop, an external gate refuses transitions and accepts evidence instead of claims — mostly occurs to you after you have operated agents on real production and watched both standard answers fail.
+
 ## How it works
 
 ```mermaid
